@@ -8,7 +8,7 @@ their respective handler.
 ## Install
 
 ```sh
-go get -u github.com/gorilla/mux
+go get -u github.com/influx6/sabuhp/mux
 ```
 
 ## Examples

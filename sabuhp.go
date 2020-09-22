@@ -5,48 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
-
-// set of possible values for Cookie.SameSite.
-const (
-	SameSiteDefaultMode = iota + 1
-	SameSiteLaxMode
-	SameSiteStrictMode
-)
-
-// A Cookie represents an HTTP cookie as sent in the Set-Cookie header of an
-// HTTP response or the Cookie header of an HTTP request.
-//
-// See https://tools.ietf.org/html/rfc6265 for details.
-type Cookie struct {
-	Secure     bool
-	HTTPOnly   bool
-	Name       string
-	Value      string
-	RawExpires string // for reading cookies only
-	Raw        string
-	Path       string    // optional
-	Domain     string    // optional
-	Expires    time.Time // optional
-	Unparsed   []string  // Raw text of unparsed attribute-value pairs
-
-	// MaxAge=0 means no 'Max-Age' attribute specified.
-	// MaxAge<0 means delete cookie now, equivalently 'Max-Age: 0'
-	// MaxAge>0 means Max-Age attribute present and given in seconds
-	MaxAge int
-
-	// SameSite allows a server to define a cookie attribute making it impossible for
-	// the browser to send this cookie along with cross-site requests. The main
-	// goal is to mitigate the risk of cross-origin information leakage, and provide
-	// some protection against cross-site request forgery attacks.
-	//
-	// See https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00 for details.
-	SameSite int
-}
 
 // Headers defines a map type providing similar header composition
 // as used with http.Request and http.Response.
@@ -106,8 +69,8 @@ func CloneHeader(h Headers) Headers {
 type Request struct {
 	TLS     bool
 	Method  string
-	Cookies []Cookie
 	URL     *url.URL
+	Cookies []*http.Cookie
 	Body    io.ReadCloser
 	Params  map[string]string
 	Headers map[string][]string
