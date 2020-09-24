@@ -269,7 +269,7 @@ func (r *Router) Name(name string) *Route {
 	return r.NewRoute().Name(name)
 }
 
-// Do registers a new route with a matcher for the URL path.
+// Handle registers a new route with a matcher for the URL path.
 // See Route.Path() and Route.Handler().
 func (r *Router) Handle(path string, handler Handler) *Route {
 	return r.NewRoute().Path(path).Handler(handler)
