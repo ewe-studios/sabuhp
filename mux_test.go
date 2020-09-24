@@ -14,7 +14,7 @@ func TestMuxRouter(t *testing.T) {
 		require.NotNil(t, request)
 		require.Equal(t, request.URL.Path, "/reply")
 		require.Equal(t, request.URL.Host, "localhost:8000")
-		return &sabuhp.Respons{}
+		return &sabuhp.Response{}
 	})
 
 	var targetURL, targetErr = url.Parse("http://localhost:8000/reply")
