@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package mux
+package sabuhp
 
 import (
 	"errors"
@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"path"
 	"regexp"
-
-	"github.com/influx6/sabuhp"
 )
 
 var (
@@ -277,7 +275,7 @@ func (r *Router) Handle(path string, handler Handler) *Route {
 
 // HandleFunc registers a new route with a matcher for the URL path.
 // See Route.Path() and Route.HandlerFunc().
-func (r *Router) HandleFunc(path string, f func(*Request) *sabuhp.Response) *Route {
+func (r *Router) HandleFunc(path string, f func(*Request) *Response) *Route {
 	return r.NewRoute().Path(path).HandlerFunc(f)
 }
 

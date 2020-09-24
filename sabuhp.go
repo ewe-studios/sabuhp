@@ -5,87 +5,40 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"net/http"
+	"mime/multipart"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
-// Headers defines a map type providing similar header composition
-// as used with http.Request and http.Response.
-type Headers map[string][]string
-
-// Add adds giving value into giving key if existing
-// else creating new version.
-func (h Headers) Add(key, value string) {
-	h[key] = append(h[key], value)
-}
-
-// Set sets giving key with giving value as a new
-// slice.
-func (h Headers) Set(key, value string) {
-	h[key] = []string{value}
-}
-
-// Get returns first value of giving key if it exists
-// else returns an empty string.
-func (h Headers) Get(key string) string {
-	if vals, ok := h[key]; ok {
-		if len(vals) > 0 {
-			return vals[0]
-		}
-	}
-	return ""
-}
-
-// Del removes giving key and associated value.
-func (h Headers) Del(key string) {
-	delete(h, key)
-}
-
-// Delete removes giving key and associated value.
-func (h Headers) Delete(key string) {
-	delete(h, key)
-}
-
-// Clone deep clones giving headers.
-func (h Headers) Clone() Headers {
-	return CloneHeader(h)
-}
-
-// CloneHeader clones giving header map returning a deep copy of it.
-func CloneHeader(h Headers) Headers {
-	h2 := make(map[string][]string, len(h))
-	for k, vv := range h {
-		vv2 := make([]string, len(vv))
-		copy(vv2, vv)
-		h2[k] = vv2
-	}
-	return h2
-}
-
-// Request implements a underline carrier of a request object which will be used
-// by a transport to request giving resource.
-type Request struct {
-	TLS     bool
-	Method  string
-	URL     *url.URL
-	Cookies []*http.Cookie
-	Body    io.ReadCloser
-	Params  map[string]string
-	Headers map[string][]string
-}
+type Header map[string][]string
 
 // Transport defines what we expect from a handler of requests.
 // It will be responsible for the serialization of request to server and
 // delivery of response or error from server.
 type Transport interface {
-	Send(ctx context.Context, request *Request) (Response, error)
+	Send(ctx context.Context, request *Request) (*Response, error)
 }
 
-//*****************************************************************************
-// Services
-//*****************************************************************************
+// Request implements a underline carrier of a request object which will be used
+// by a transport to request giving resource.
+type Request struct {
+	Proto            string // "HTTP/1.0"
+	TransferEncoding []string
+	Host             string
+	Form             url.Values
+	PostForm         url.Values
+	MultipartForm    *multipart.Form
+	IP               string
+	TLS              bool
+	Method           string
+	URL              *url.URL
+	Cookies          []Cookie
+	Body             io.ReadCloser
+	Params           map[string]string
+	Headers          map[string][]string
+	TargetRoute      *Route
+}
 
 // Response is an implementation of http.ResponseWriter that
 // records its mutations for later inspection in tests.
@@ -100,7 +53,7 @@ type Response struct {
 	Code int
 
 	// HeaderMap contains the headers explicitly set by the Handler.
-	HeaderMap Headers
+	HeaderMap Header
 
 	// Body is the buffer to which the Handler's Write calls are sent.
 	// If nil, the Writes are silently discarded.

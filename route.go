@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package mux
+package sabuhp
 
 import (
 	"errors"
@@ -10,34 +10,25 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-
-	"github.com/influx6/sabuhp"
 )
-
-type Request struct {
-	*sabuhp.Request
-	TargetRoute *Route
-}
 
 func NewRequest(method string, url *url.URL, headers map[string][]string) *Request {
 	return &Request{
-		Request: &sabuhp.Request{
-			URL:     url,
-			Method:  method,
-			Headers: headers,
-			Params:  map[string]string{},
-		},
+		URL:     url,
+		Method:  method,
+		Headers: headers,
+		Params:  map[string]string{},
 	}
 }
 
 type Handler interface {
-	Do(*Request) *sabuhp.Response
+	Do(*Request) *Response
 }
 
-type HandlerFunc func(request *Request) *sabuhp.Response
+type HandlerFunc func(request *Request) *Response
 
 // Handle implements the Handler interface Handle method.
-func (h HandlerFunc) Do(req *Request) *sabuhp.Response {
+func (h HandlerFunc) Do(req *Request) *Response {
 	return h(req)
 }
 
@@ -154,7 +145,7 @@ func (r *Route) Handler(handler Handler) *Route {
 }
 
 // HandlerFunc sets a handler function for the route.
-func (r *Route) HandlerFunc(f func(*Request) *sabuhp.Response) *Route {
+func (r *Route) HandlerFunc(f func(*Request) *Response) *Route {
 	var hf = HandlerFunc(f)
 	return r.Handler(hf)
 }
