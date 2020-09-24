@@ -31,14 +31,14 @@ func NewRequest(method string, url *url.URL, headers map[string][]string) *Reque
 }
 
 type Handler interface {
-	Do(*Request)
+	Do(*Request) *sabuhp.Response
 }
 
-type HandlerFunc func(request *Request)
+type HandlerFunc func(request *Request) *sabuhp.Response
 
 // Handle implements the Handler interface Handle method.
-func (h HandlerFunc) Do(req *Request) {
-	h(req)
+func (h HandlerFunc) Do(req *Request) *sabuhp.Response {
+	return h(req)
 }
 
 // Route stores information to match a request and build URLs.
@@ -154,8 +154,9 @@ func (r *Route) Handler(handler Handler) *Route {
 }
 
 // HandlerFunc sets a handler function for the route.
-func (r *Route) HandlerFunc(f func(*Request)) *Route {
-	return r.Handler(HandlerFunc(f))
+func (r *Route) HandlerFunc(f func(*Request) *sabuhp.Response) *Route {
+	var hf = HandlerFunc(f)
+	return r.Handler(hf)
 }
 
 // GetHandler returns the handler for the route, if any.

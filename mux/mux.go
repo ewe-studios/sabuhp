@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+
+	"github.com/influx6/sabuhp"
 )
 
 var (
@@ -275,7 +277,7 @@ func (r *Router) Handle(path string, handler Handler) *Route {
 
 // HandleFunc registers a new route with a matcher for the URL path.
 // See Route.Path() and Route.HandlerFunc().
-func (r *Router) HandleFunc(path string, f func(*Request)) *Route {
+func (r *Router) HandleFunc(path string, f func(*Request) *sabuhp.Response) *Route {
 	return r.NewRoute().Path(path).HandlerFunc(f)
 }
 
