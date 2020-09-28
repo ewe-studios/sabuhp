@@ -1,7 +1,9 @@
 package sabuhp
 
 import (
+	"io"
 	"net/http"
+	"net/url"
 )
 
 func HTTPRequestToRequest(req *http.Request) *Request {
@@ -20,4 +22,18 @@ func HTTPRequestToRequest(req *http.Request) *Request {
 		Body:          req.Body,
 		Cookies:       ReadCookies(headers, ""),
 	}
+}
+
+func NewRequest(addr string, method string, body io.ReadCloser) (*Request, error) {
+	var reqURL, reqErr = url.Parse(addr)
+	if reqErr != nil {
+		return nil, reqErr
+	}
+
+	return &Request{
+		URL:    reqURL,
+		Host:   reqURL.Host,
+		Method: method,
+		Body:   body,
+	}, nil
 }

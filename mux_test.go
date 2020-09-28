@@ -1,7 +1,6 @@
 package sabuhp_test
 
 import (
-	"net/url"
 	"testing"
 
 	"github.com/influx6/sabuhp"
@@ -9,17 +8,18 @@ import (
 )
 
 func TestMuxRouter(t *testing.T) {
-	var mr = sabuhp.NewRouter()
-	mr.HandleFunc("/reply", func(request *sabuhp.Request) *sabuhp.Response {
+	var mr = sabuhp.NewMux()
+	mr.UseHandleFunc("/reply", func(request *sabuhp.Request, params sabuhp.Params) sabuhp.Response {
 		require.NotNil(t, request)
 		require.Equal(t, request.URL.Path, "/reply")
 		require.Equal(t, request.URL.Host, "localhost:8000")
-		return &sabuhp.Response{}
+		return sabuhp.Response{Code: 200}
 	})
 
-	var targetURL, targetErr = url.Parse("http://localhost:8000/reply")
-	require.NoError(t, targetErr)
-	require.NotNil(t, targetURL)
+	var req, reqErr = sabuhp.NewRequest("http://localhost:8000/reply", "GET", nil)
+	require.NoError(t, reqErr)
+	require.NotNil(t, req)
 
-	mr.Serve(sabuhp.NewRequest("GET", targetURL, map[string][]string{}))
+	var response = mr.Handle(req)
+	require.Equal(t, 200, response.Code)
 }

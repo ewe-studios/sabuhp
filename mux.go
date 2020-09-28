@@ -1,532 +1,398 @@
-// Copyright 2012 The Gorilla Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package sabuhp
 
 import (
-	"errors"
-	"fmt"
+	"bytes"
 	"net/http"
+	"net/url"
 	"path"
-	"regexp"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
-var (
-	// ErrMethodMismatch is returned when the method in the request does not match
-	// the method defined against the route.
-	ErrMethodMismatch = errors.New("method is not allowed")
-	// ErrNotFound is returned when no route match is found.
-	ErrNotFound = errors.New("no matching route was found")
+// Mux is an HTTP request multiplexer.
+// It matches the URL of each incoming request against a list of registered
+// nodes and calls the handler for the pattern that
+// most closely matches the URL.
+//
+// Patterns name fixed, rooted paths and dynamic like /profile/:name
+// or /profile/:name/friends or even /files/*file when ":name" and "*file"
+// are the named parameters and wildcard parameters respectfully.
+//
+// Note that since a pattern ending in a slash names a rooted subtree,
+// the pattern "/*myparam" matches all paths not matched by other registered
+// patterns, but not the URL with Path == "/", for that you would need the pattern "/".
+//
+// See `NewMux`.
+type Mux struct {
+	// PathCorrection removes leading slashes from the request path.
+	// Defaults to false, however is highly recommended to turn it on.
+	PathCorrection bool
+
+	// PathCorrectionNoRedirect if `PathCorrection` is set to true,
+	// it will execute the handlers chain without redirection.
+	// Defaults to false.
+	PathCorrectionNoRedirect bool
+	Routes                   *Trie
+
+	// per mux
+	root            string
+	requestHandlers []RequestHandler
+	beginHandlers   []Wrapper
+}
+
+// NewMux returns a new HTTP multiplexer which uses a fast, if not the fastest
+// implementation of the trie data structure that is designed especially for path segments.
+func NewMux() *Mux {
+	return &Mux{
+		Routes: NewTrie(),
+		root:   "",
+	}
+}
+
+// AddRequestHandler adds a full `RequestHandler` which is responsible
+// to check if a handler should be executed via its `Matcher`,
+// if the handler is executed
+// then the router stops searching for this Mux' routes,
+// RequestHandelrs have priority over the routes and the middlewares.
+//
+// The "requestHandler"'s Handler can be any Handler
+// and a new `muxie.NewMux` as well. The new Mux will
+// be not linked to this Mux by-default, if you want to share
+// middlewares then you have to use the `muxie.Pre` to declare
+// the shared middlewares and register them via the `Mux#Use` function.
+func (m *Mux) AddRequestHandler(requestHandler RequestHandler) {
+	m.requestHandlers = append(m.requestHandlers, requestHandler)
+}
+
+// HandleRequest adds a matcher and a (conditional) handler to be executed when "matcher" passed.
+// If the "matcher" passed then the "handler" will be executed
+// and this Mux' routes will be ignored.
+//
+// Look the `Mux#AddRequestHandler` for further details.
+func (m *Mux) HandleRequest(matcher Matcher, handler Handler) {
+	m.AddRequestHandler(&simpleRequestHandler{
+		Matcher: matcher,
+		Handler: handler,
+	})
+}
+
+// Use adds middleware that should be called before each mux route's main handler.
+// Should be called before `UseHandle/UseHandleFunc`. Order matters.
+//
+// A Wrapper is just a type of `func(Handler) Handler`
+// which is a common type definition for net/http middlewares.
+//
+// To add a middleware for a specific route and not in the whole mux
+// use the `UseHandle/UseHandleFunc` with the package-level `muxie.Pre` function instead.
+// Functionality of `Use` is pretty self-explained but new gophers should
+// take a look of the examples for further details.
+func (m *Mux) Use(middlewares ...Wrapper) {
+	m.beginHandlers = append(m.beginHandlers, middlewares...)
+}
+
+type (
+	// Wrapper is just a type of `func(Handler) Handler`
+	// which is a common type definition for net/http middlewares.
+	Wrapper func(Handler) Handler
+
+	// Wrappers contains `Wrapper`s that can be registered and used by a "main route handler".
+	// Look the `Pre` and `For/ForFunc` functions too.
+	Wrappers []Wrapper
 )
 
-type Params map[string]string
-
-// NewRouter returns a new router instance.
-func NewRouter() *Router {
-	return &Router{namedRoutes: make(map[string]*Route)}
-}
-
-// Router registers routes to be matched and dispatches a handler.
-//
-// It implements the Handler interface, so it can be registered to serve
-// requests:
-//
-//     var router = mux.NewRouter()
-//
-//     func main() {
-//         http.Handle("/", router)
-//     }
-//
-// Or, for Google App Engine, register it in a init() function:
-//
-//     func init() {
-//         http.Handle("/", router)
-//     }
-//
-// This will send all incoming requests to the router.
-type Router struct {
-	RedirectHandler         Handler
-	NotFoundHandler         Handler
-	MethodNotAllowedHandler Handler
-	PermanentlyMovedHandler Handler
-
-	// Routes to be matched, in order.
-	routes []*Route
-
-	// Routes by name for URL building.
-	namedRoutes map[string]*Route
-
-	// If true, do not clear the request context after handling the request.
-	//
-	// Deprecated: No effect, since the context is stored on the request itself.
-	KeepContext bool
-
-	// configuration shared with `Route`
-	routeConf
-}
-
-// common route configuration shared between `Router` and `Route`
-type routeConf struct {
-	// If true, "/path/foo%2Fbar/to" will match the path "/path/{var}/to"
-	useEncodedPath bool
-
-	// If true, when the path pattern is "/path/", accessing "/path" will
-	// redirect to the former and vice versa.
-	strictSlash bool
-
-	// If true, when the path pattern is "/path//to", accessing "/path//to"
-	// will not redirect
-	skipClean bool
-
-	// Manager for the variables from host and path.
-	regexp routeRegexpGroup
-
-	// List of matchers.
-	matchers []matcher
-
-	// The scheme used when building URLs.
-	buildScheme string
-
-	buildVarsFunc BuildVarsFunc
-}
-
-// returns an effective deep copy of `routeConf`
-func copyRouteConf(r routeConf) routeConf {
-	c := r
-
-	if r.regexp.path != nil {
-		c.regexp.path = copyRouteRegexp(r.regexp.path)
-	}
-
-	if r.regexp.host != nil {
-		c.regexp.host = copyRouteRegexp(r.regexp.host)
-	}
-
-	c.regexp.queries = make([]*routeRegexp, 0, len(r.regexp.queries))
-	for _, q := range r.regexp.queries {
-		c.regexp.queries = append(c.regexp.queries, copyRouteRegexp(q))
-	}
-
-	c.matchers = make([]matcher, len(r.matchers))
-	copy(c.matchers, r.matchers)
-
-	return c
-}
-
-func copyRouteRegexp(r *routeRegexp) *routeRegexp {
-	c := *r
-	return &c
-}
-
-// Match attempts to match the given request against the router's registered routes.
-//
-// If the request matches a route of this router or one of its subrouters the Route,
-// Handler, and Vars fields of the the match argument are filled and this function
-// returns true.
-//
-// If the request does not match any of this router's or its subrouters' routes
-// then this function returns false. If available, a reason for the match failure
-// will be filled in the match argument's MatchErr field. If the match failure type
-// (eg: not found) has a registered handler, the handler is assigned to the Handler
-// field of the match argument.
-func (r *Router) Match(req *Request, match *RouteMatch) bool {
-	for _, route := range r.routes {
-		if route.Match(req, match) {
-			return true
+// For registers the wrappers for a specific handler and returns a handler
+// that can be passed via the `UseHandle` function.
+func (w Wrappers) For(main Handler) Handler {
+	if len(w) > 0 {
+		for i, lidx := 0, len(w)-1; i <= lidx; i++ {
+			main = w[lidx-i](main)
 		}
 	}
 
-	if match.MatchErr == ErrMethodMismatch {
-		if r.MethodNotAllowedHandler != nil {
-			match.Handler = r.MethodNotAllowedHandler
-			return true
-		}
+	return main
+}
 
-		return false
+// ForFunc registers the wrappers for a specific raw handler function
+// and returns a handler that can be passed via the `UseHandle` function.
+func (w Wrappers) ForFunc(mainFunc func(*Request, Params) Response) Handler {
+	return w.For(HandlerFunc(mainFunc))
+}
+
+// Pre starts a chain of handlers for wrapping a "main route handler"
+// the registered "middleware" will run before the main handler(see `Wrappers#For/ForFunc`).
+//
+// Usage:
+// mux := muxie.NewMux()
+// myMiddlewares :=  muxie.Pre(myFirstMiddleware, mySecondMiddleware)
+// mux.UseHandle("/", myMiddlewares.ForFunc(myMainRouteHandler))
+func Pre(middleware ...Wrapper) Wrappers {
+	return Wrappers(middleware)
+}
+
+// Handle registers a route handler for a path pattern.
+func (m *Mux) UseHandle(pattern string, handler Handler) {
+	m.Routes.Insert(m.root+pattern,
+		WithHandler(
+			Pre(m.beginHandlers...).For(handler)))
+}
+
+// HandleFunc registers a route handler function for a path pattern.
+func (m *Mux) UseHandleFunc(pattern string, handlerFunc func(*Request, Params) Response) {
+	m.UseHandle(pattern, HandlerFunc(handlerFunc))
+}
+
+// Serve exposes and serves the registered routes.
+func (m *Mux) Handle(r *Request) Response {
+	var params Params
+	for _, h := range m.requestHandlers {
+		if h.Match(r) {
+			return h.Handle(r, params)
+		}
 	}
 
-	// Closest match for a router (includes sub-routers)
-	if r.NotFoundHandler != nil {
-		match.Handler = r.NotFoundHandler
-		match.MatchErr = ErrNotFound
-		return true
-	}
+	var reqPath = r.URL.Path
+	if m.PathCorrection {
+		if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
+			// Remove trailing slash and client-permanent rule for redirection,
+			// if confgiuration allows that and reqPath has an extra slash.
 
-	match.MatchErr = ErrNotFound
-	return false
-}
-
-// Serve dispatches the handler registered in the matched route.
-//
-// When there is a match, the route variables can be retrieved calling
-// mux.Vars(request).
-func (r *Router) Serve(req *Request) (Handler, Params) {
-	if !r.skipClean {
-		var reqPath = req.URL.Path
-		if r.useEncodedPath {
-			reqPath = req.URL.EscapedPath()
-		}
-		// Clean path to canonical form and redirect.
-		if p := cleanPath(reqPath); p != reqPath {
-
-			// Added 3 lines (Philip Schlump) - It was dropping the query string and #whatever from query.
-			// This matches with fix in go 1.2 r.c. 4 for same problem.  Go Issue:
-			// http://code.google.com/p/go/issues/detail?id=5252
-			return r.PermanentlyMovedHandler, map[string]string{}
-		}
-	}
-	var match RouteMatch
-	var handler Handler
-	if r.Match(req, &match) {
-		handler = match.Handler
-		return handler, match.Vars
-	}
-
-	if match.MatchErr == ErrMethodMismatch {
-		return r.MethodNotAllowedHandler, map[string]string{}
-	}
-
-	return r.NotFoundHandler, map[string]string{}
-}
-
-// Get returns a route registered with the given name.
-func (r *Router) Get(name string) *Route {
-	return r.namedRoutes[name]
-}
-
-// GetRoute returns a route registered with the given name. This method
-// was renamed to Get() and remains here for backwards compatibility.
-func (r *Router) GetRoute(name string) *Route {
-	return r.namedRoutes[name]
-}
-
-// StrictSlash defines the trailing slash behavior for new routes. The initial
-// value is false.
-//
-// When true, if the route path is "/path/", accessing "/path" will perform a redirect
-// to the former and vice versa. In other words, your application will always
-// see the path as specified in the route.
-//
-// When false, if the route path is "/path", accessing "/path/" will not match
-// this route and vice versa.
-//
-// The re-direct is a HTTP 301 (Moved Permanently). Note that when this is set for
-// routes with a non-idempotent method (e.g. POST, PUT), the subsequent re-directed
-// request will be made as a GET by most clients. Use middleware or client settings
-// to modify this behaviour as needed.
-//
-// Special case: when a route sets a path prefix using the PathPrefix() method,
-// strict slash is ignored for that route because the redirect behavior can't
-// be determined from a prefix alone. However, any subrouters created from that
-// route inherit the original StrictSlash setting.
-func (r *Router) StrictSlash(value bool) *Router {
-	r.strictSlash = value
-	return r
-}
-
-// SkipClean defines the path cleaning behaviour for new routes. The initial
-// value is false. Users should be careful about which routes are not cleaned
-//
-// When true, if the route path is "/path//to", it will remain with the double
-// slash. This is helpful if you have a route like: /fetch/http://xkcd.com/534/
-//
-// When false, the path will be cleaned, so /fetch/http://xkcd.com/534/ will
-// become /fetch/http/xkcd.com/534
-func (r *Router) SkipClean(value bool) *Router {
-	r.skipClean = value
-	return r
-}
-
-// UseEncodedPath tells the router to match the encoded original path
-// to the routes.
-// For eg. "/path/foo%2Fbar/to" will match the path "/path/{var}/to".
-//
-// If not called, the router will match the unencoded path to the routes.
-// For eg. "/path/foo%2Fbar/to" will match the path "/path/foo/bar/to"
-func (r *Router) UseEncodedPath() *Router {
-	r.useEncodedPath = true
-	return r
-}
-
-// ----------------------------------------------------------------------------
-// Route factories
-// ----------------------------------------------------------------------------
-
-// NewRoute registers an empty route.
-func (r *Router) NewRoute() *Route {
-	// initialize a route with a copy of the parent router's configuration
-	route := &Route{routeConf: copyRouteConf(r.routeConf), namedRoutes: r.namedRoutes}
-	r.routes = append(r.routes, route)
-	return route
-}
-
-// Name registers a new route with a name.
-// See Route.Name().
-func (r *Router) Name(name string) *Route {
-	return r.NewRoute().Name(name)
-}
-
-// Handle registers a new route with a matcher for the URL path.
-// See Route.Path() and Route.Handler().
-func (r *Router) Handle(path string, handler Handler) *Route {
-	return r.NewRoute().Path(path).Handler(handler)
-}
-
-// HandleFunc registers a new route with a matcher for the URL path.
-// See Route.Path() and Route.HandlerFunc().
-func (r *Router) HandleFunc(path string, f func(*Request) *Response) *Route {
-	return r.NewRoute().Path(path).HandlerFunc(f)
-}
-
-// Headers registers a new route with a matcher for request header values.
-// See Route.Headers().
-func (r *Router) Headers(pairs ...string) *Route {
-	return r.NewRoute().Headers(pairs...)
-}
-
-// Host registers a new route with a matcher for the URL host.
-// See Route.Host().
-func (r *Router) Host(tpl string) *Route {
-	return r.NewRoute().Host(tpl)
-}
-
-// MatcherFunc registers a new route with a custom matcher function.
-// See Route.MatcherFunc().
-func (r *Router) MatcherFunc(f MatcherFunc) *Route {
-	return r.NewRoute().MatcherFunc(f)
-}
-
-// Methods registers a new route with a matcher for HTTP methods.
-// See Route.Methods().
-func (r *Router) Methods(methods ...string) *Route {
-	return r.NewRoute().Methods(methods...)
-}
-
-// Path registers a new route with a matcher for the URL path.
-// See Route.Path().
-func (r *Router) Path(tpl string) *Route {
-	return r.NewRoute().Path(tpl)
-}
-
-// PathPrefix registers a new route with a matcher for the URL path prefix.
-// See Route.PathPrefix().
-func (r *Router) PathPrefix(tpl string) *Route {
-	return r.NewRoute().PathPrefix(tpl)
-}
-
-// Queries registers a new route with a matcher for URL query values.
-// See Route.Queries().
-func (r *Router) Queries(pairs ...string) *Route {
-	return r.NewRoute().Queries(pairs...)
-}
-
-// Schemes registers a new route with a matcher for URL schemes.
-// See Route.Schemes().
-func (r *Router) Schemes(schemes ...string) *Route {
-	return r.NewRoute().Schemes(schemes...)
-}
-
-// BuildVarsFunc registers a new route with a custom function for modifying
-// route variables before building a URL.
-func (r *Router) BuildVarsFunc(f BuildVarsFunc) *Route {
-	return r.NewRoute().BuildVarsFunc(f)
-}
-
-// Walk walks the router and all its sub-routers, calling walkFn for each route
-// in the tree. The routes are walked in the order they were added. Sub-routers
-// are explored depth-first.
-func (r *Router) Walk(walkFn WalkFunc) error {
-	return r.walk(walkFn, []*Route{})
-}
-
-// SkipRouter is used as a return value from WalkFuncs to indicate that the
-// router that walk is about to descend down to should be skipped.
-var SkipRouter = errors.New("skip this router")
-
-// WalkFunc is the type of the function called for each route visited by Walk.
-// At every invocation, it is given the current route, and the current router,
-// and a list of ancestor routes that lead to the current route.
-type WalkFunc func(route *Route, router *Router, ancestors []*Route) error
-
-func (r *Router) walk(walkFn WalkFunc, ancestors []*Route) error {
-	for _, t := range r.routes {
-		err := walkFn(t, r, ancestors)
-		if err == SkipRouter {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		for _, sr := range t.matchers {
-			if h, ok := sr.(*Router); ok {
-				ancestors = append(ancestors, t)
-				err := h.walk(walkFn, ancestors)
-				if err != nil {
-					return err
+			// update the new reqPath and redirect.
+			// use Trim to ensure there is no open redirect due to two leading slashes
+			r.URL.Path = pathSep + strings.Trim(reqPath, pathSep)
+			if !m.PathCorrectionNoRedirect {
+				var targetURL = r.URL.String()
+				method := r.Method
+				// Fixes https://github.com/kataras/iris/issues/921
+				// This is caused for security reasons, imagine a payment shop,
+				// you can't just permanently redirect a POST request, so just 307 (RFC 7231, 6.4.7).
+				if method == http.MethodPost || method == http.MethodPut {
+					return redirect(r, targetURL, http.StatusTemporaryRedirect)
 				}
-				ancestors = ancestors[:len(ancestors)-1]
+
+				return redirect(r, targetURL, http.StatusTemporaryRedirect)
 			}
 		}
 	}
-	return nil
+
+	// r.URL.Query() is slow and will allocate a lot, although
+	// the first idea was to not introduce a new type to the end-developers
+	// so they are using this library as the std one, but we will have to do it
+	// for the params, we keep that rule so a new ResponseWriter, which is an interface,
+	// and it will be compatible with net/http will be introduced to store the params at least,
+	// we don't want to add a third parameter or a global state to this library.
+
+	n := m.Routes.Search(reqPath, params)
+	if n != nil {
+		return n.Handler.Handle(r, params)
+	}
+
+	return Response{
+		Code: http.StatusNotFound,
+	}
 }
 
-// ----------------------------------------------------------------------------
-// Context
-// ----------------------------------------------------------------------------
-
-// RouteMatch stores information about a matched route.
-type RouteMatch struct {
-	Route   *Route
-	Handler Handler
-	Vars    map[string]string
-
-	// MatchErr is set to appropriate matching error
-	// It is set to ErrMethodMismatch if there is a mismatch in
-	// the request method and route method
-	MatchErr error
+// SubMux is the child of a main Mux.
+type SubMux interface {
+	Of(prefix string) SubMux
+	Unlink() SubMux
+	Use(middlewares ...Wrapper)
+	UseHandle(pattern string, handler Handler)
+	AbsPath() string
+	UseHandleFunc(pattern string, handlerFunc func(*Request, Params) Response)
 }
 
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
+// Of returns a new Mux which its Handle and HandleFunc will register the path based on given "prefix", i.e:
+// mux := NewMux()
+// v1 := mux.Of("/v1")
+// v1.UseHandleFunc("/users", myHandler)
+// The above will register the "myHandler" to the "/v1/users" path pattern.
+func (m *Mux) Of(prefix string) SubMux {
+	if prefix == "" || prefix == pathSep {
+		return m
+	}
 
-// cleanPath returns the canonical path for p, eliminating . and .. elements.
-// Borrowed from the net/http package.
-func cleanPath(p string) string {
-	if p == "" {
+	if prefix == m.root {
+		return m
+	}
+
+	// modify prefix if it's already there on the parent.
+	if strings.HasPrefix(m.root, prefix) {
+		prefix = prefix[0:strings.LastIndex(m.root, prefix)]
+	}
+
+	// remove last slash "/", if any.
+	if lidx := len(prefix) - 1; prefix[lidx] == pathSepB {
+		prefix = prefix[0:lidx]
+	}
+
+	// remove any duplication of slashes "/".
+	prefix = pathSep + strings.Trim(m.root+prefix, pathSep)
+
+	return &Mux{
+		Routes: m.Routes,
+
+		root:            prefix,
+		requestHandlers: m.requestHandlers[0:],
+		beginHandlers:   m.beginHandlers[0:],
+	}
+}
+
+// AbsPath returns the absolute path of the router for this Mux group.
+func (m *Mux) AbsPath() string {
+	if m.root == "" {
 		return "/"
 	}
-	if p[0] != '/' {
-		p = "/" + p
-	}
-	np := path.Clean(p)
-	// path.Clean removes trailing slash except for root;
-	// put the trailing slash back if necessary.
-	if p[len(p)-1] == '/' && np != "/" {
-		np += "/"
-	}
-
-	return np
+	return m.root
 }
 
-// uniqueVars returns an error if two slices contain duplicated strings.
-func uniqueVars(s1, s2 []string) error {
-	for _, v1 := range s1 {
-		for _, v2 := range s2 {
-			if v1 == v2 {
-				return fmt.Errorf("mux: duplicated route variable %q", v2)
+/* Notes:
+
+Four options to solve optionally "inherition" of parent's middlewares but dismissed:
+
+- I could add options for "inherition" of middlewares inside the `Mux#Use` itself.
+  But this is a problem because the end-dev will have to use a specific muxie's constant even if he doesn't care about the other option.
+- Create a new function like `UseOnly` or `UseExplicit`
+  which will remove any previous middlewares and use only the new one.
+  But this has a problem of making the `Use` func to act differently and debugging will be a bit difficult if big app if called after the `UseOnly`.
+- Add a new func for creating new groups to remove any inherited middlewares from the parent.
+  But with this, we will have two functions for the same thing and users may be confused about this API design.
+- Put the options to the existing `Of` function, and make them optionally by functional design of options.
+  But this will make things ugly and may confuse users as well, there is a better way.
+
+Solution: just add a function like `Unlink`
+to remove any inherited fields (now and future feature requests), so we don't have
+breaking changes and etc. This `Unlink`, which will return the same SubMux, it can be used like `v1 := mux.Of(..).Unlink()`
+*/
+
+// Unlink will remove any inheritance fields from the parent mux (and its parent)
+// that are inherited with the `Of` function.
+// Returns the current SubMux. Usage:
+//
+// mux := NewMux()
+// mux.Use(myLoggerMiddleware)
+// v1 := mux.Of("/v1").Unlink() // v1 will no longer have the "myLoggerMiddleware" or any Matchers.
+// v1.UseHandleFunc("/users", myHandler)
+func (m *Mux) Unlink() SubMux {
+	m.requestHandlers = m.requestHandlers[0:0]
+	m.beginHandlers = m.beginHandlers[0:0]
+
+	return m
+}
+
+func redirect(r *Request, uri string, code int) Response {
+	var h Header
+	if u, err := url.Parse(uri); err == nil {
+		// If url was relative, make its path absolute by
+		// combining with request path.
+		// The client would probably do this for us,
+		// but doing it ourselves is more reliable.
+		// See RFC 7231, section 7.1.2
+		if u.Scheme == "" && u.Host == "" {
+			oldpath := r.URL.Path
+			if oldpath == "" { // should not happen, but avoid a crash if it does
+				oldpath = "/"
 			}
+
+			// no leading http://server
+			if uri == "" || uri[0] != '/' {
+				// make relative path absolute
+				olddir, _ := path.Split(oldpath)
+				uri = olddir + uri
+			}
+
+			var query string
+			if i := strings.Index(uri, "?"); i != -1 {
+				uri, query = uri[:i], uri[i:]
+			}
+
+			// clean up but preserve trailing slash
+			trailing := strings.HasSuffix(uri, "/")
+			uri = path.Clean(uri)
+			if trailing && !strings.HasSuffix(uri, "/") {
+				uri += "/"
+			}
+			uri += query
 		}
 	}
-	return nil
+
+	// RFC 7231 notes that a short HTML body is usually included in
+	// the response because older user agents may not understand 301/307.
+	// Do it only if the request didn't already have a Content-Type header.
+	_, hadCT := h["Content-Type"]
+
+	h.Set("Location", hexEscapeNonASCII(uri))
+	if !hadCT && (r.Method == "GET" || r.Method == "HEAD") {
+		h.Set("Content-Type", "text/html; charset=utf-8")
+	}
+
+	// Shouldn't send the body for POST or HEAD; that leaves GET.
+	var content string
+	if !hadCT && r.Method == "GET" {
+		content = "<a href=\"" + htmlEscape(uri) + "\">" + http.StatusText(code) + "</a>.\n"
+	}
+
+	return Response{
+		Headers: h,
+		Code:    code,
+		Body:    bytes.NewBufferString(content),
+	}
 }
 
-// checkPairs returns the count of strings passed in, and an error if
-// the count is not an even number.
-func checkPairs(pairs ...string) (int, error) {
-	length := len(pairs)
-	if length%2 != 0 {
-		return length, fmt.Errorf(
-			"mux: number of parameters must be multiple of 2, got %v", pairs)
-	}
-	return length, nil
-}
-
-// mapFromPairsToString converts variadic string parameters to a
-// string to string map.
-func mapFromPairsToString(pairs ...string) (map[string]string, error) {
-	length, err := checkPairs(pairs...)
-	if err != nil {
-		return nil, err
-	}
-	m := make(map[string]string, length/2)
-	for i := 0; i < length; i += 2 {
-		m[pairs[i]] = pairs[i+1]
-	}
-	return m, nil
-}
-
-// mapFromPairsToRegex converts variadic string parameters to a
-// string to regex map.
-func mapFromPairsToRegex(pairs ...string) (map[string]*regexp.Regexp, error) {
-	length, err := checkPairs(pairs...)
-	if err != nil {
-		return nil, err
-	}
-	m := make(map[string]*regexp.Regexp, length/2)
-	for i := 0; i < length; i += 2 {
-		regex, err := regexp.Compile(pairs[i+1])
-		if err != nil {
-			return nil, err
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
 		}
-		m[pairs[i]] = regex
 	}
-	return m, nil
+	return true
 }
 
-// matchInArray returns true if the given string value is in the array.
-func matchInArray(arr []string, value string) bool {
-	for _, v := range arr {
-		if v == value {
+// stringContainsCTLByte reports whether s contains any ASCII control character.
+func stringContainsCTLByte(s string) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b < ' ' || b == 0x7f {
 			return true
 		}
 	}
 	return false
 }
 
-// matchMapWithString returns true if the given key/value pairs exist in a given map.
-func matchMapWithString(toCheck map[string]string, toMatch map[string][]string, canonicalKey bool) bool {
-	for k, v := range toCheck {
-		// Check if key exists.
-		if canonicalKey {
-			k = http.CanonicalHeaderKey(k)
-		}
-		if values := toMatch[k]; values == nil {
-			return false
-		} else if v != "" {
-			// If value was defined as an empty string we only check that the
-			// key exists. Otherwise we also check for equality.
-			valueExists := false
-			for _, value := range values {
-				if v == value {
-					valueExists = true
-					break
-				}
-			}
-			if !valueExists {
-				return false
-			}
+func hexEscapeNonASCII(s string) string {
+	newLen := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			newLen += 3
+		} else {
+			newLen++
 		}
 	}
-	return true
+	if newLen == len(s) {
+		return s
+	}
+	b := make([]byte, 0, newLen)
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			b = append(b, '%')
+			b = strconv.AppendInt(b, int64(s[i]), 16)
+		} else {
+			b = append(b, s[i])
+		}
+	}
+	return string(b)
 }
 
-// matchMapWithRegex returns true if the given key/value pairs exist in a given map compiled against
-// the given regex
-func matchMapWithRegex(toCheck map[string]*regexp.Regexp, toMatch map[string][]string, canonicalKey bool) bool {
-	for k, v := range toCheck {
-		// Check if key exists.
-		if canonicalKey {
-			k = http.CanonicalHeaderKey(k)
-		}
-		if values := toMatch[k]; values == nil {
-			return false
-		} else if v != nil {
-			// If value was defined as an empty string we only check that the
-			// key exists. Otherwise we also check for equality.
-			valueExists := false
-			for _, value := range values {
-				if v.MatchString(value) {
-					valueExists = true
-					break
-				}
-			}
-			if !valueExists {
-				return false
-			}
-		}
-	}
-	return true
+var htmlReplacer = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	// "&#34;" is shorter than "&quot;".
+	`"`, "&#34;",
+	// "&#39;" is shorter than "&apos;" and apos was not in HTML until HTML5.
+	"'", "&#39;",
+)
+
+func htmlEscape(s string) string {
+	return htmlReplacer.Replace(s)
 }
