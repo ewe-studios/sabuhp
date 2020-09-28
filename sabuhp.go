@@ -107,7 +107,8 @@ type Response struct {
 	// Flushed is whether the Handler called Flush.
 	Flushed bool
 
-	wroteHeader bool
+	// Err object attached to response.
+	Err error
 }
 
 // NewResponse returns an initialized Response.
