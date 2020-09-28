@@ -82,8 +82,7 @@ type Request struct {
 	URL              *url.URL
 	Cookies          []Cookie
 	Body             io.ReadCloser
-	Params           map[string]string
-	Headers          map[string][]string
+	Headers          Header
 }
 
 // Response is an implementation of http.ResponseWriter that
