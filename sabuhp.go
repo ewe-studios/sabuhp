@@ -88,6 +88,10 @@ type Request struct {
 // Response is an implementation of http.ResponseWriter that
 // records its mutations for later inspection in tests.
 type Response struct {
+	// RedirectURL is used to indicate the url to redirect to
+	// if we are doing a Temporary or Permanent redirect response.
+	// It's usually should be null unless its a redirect.
+	RedirectURL *url.URL
 
 	// Code is the HTTP response code set by WriteHeader.
 	//
@@ -99,6 +103,9 @@ type Response struct {
 
 	// Headers the headers explicitly set by the Handler.
 	Headers Header
+
+	// Cookies contains the cookies to be written as part of response.
+	Cookies []Cookie
 
 	// Body is the buffer to which the Handler's Write calls are sent.
 	// If nil, the Writes are silently discarded.
