@@ -161,7 +161,7 @@ func readSetCookies(h Header) []*Cookie {
 // String returns the serialization of the cookie for use in a Cookie
 // header (if only Name and Value are set) or a Set-Cookie response
 // header (if other fields are set).
-// If c is nil or c.Name is invalid, the empty string is returned.
+// If c is nil or c.PageName is invalid, the empty string is returned.
 func (c *Cookie) String() string {
 	if c == nil || !isCookieNameValid(c.Name) {
 		return ""

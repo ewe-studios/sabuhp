@@ -144,7 +144,7 @@ func (m *Mux) UseHandleFunc(pattern string, handlerFunc func(*Request, Params) R
 
 // Serve exposes and serves the registered routes.
 func (m *Mux) Handle(r *Request) Response {
-	var params Params
+	var params = Params{}
 	for _, h := range m.requestHandlers {
 		if h.Match(r) {
 			return h.Handle(r, params)
