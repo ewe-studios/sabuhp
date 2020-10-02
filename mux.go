@@ -188,7 +188,8 @@ func (m *Mux) Handle(r *Request) Response {
 	}
 
 	return Response{
-		Code: http.StatusNotFound,
+		Code:    http.StatusNotFound,
+		Headers: Header{},
 	}
 }
 
