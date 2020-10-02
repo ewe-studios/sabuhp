@@ -31,9 +31,10 @@ func NewRequest(addr string, method string, body io.ReadCloser) (*Request, error
 	}
 
 	return &Request{
-		URL:    reqURL,
-		Host:   reqURL.Host,
-		Method: method,
-		Body:   body,
+		Headers: Header{},
+		Host:    reqURL.Host,
+		URL:     reqURL,
+		Method:  method,
+		Body:    body,
 	}, nil
 }
