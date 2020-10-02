@@ -40,6 +40,7 @@ func Methods() *MethodHandler {
 // See `MethodHandler.NoContent` method.
 var NoContentHandler Handler = HandlerFunc(func(r *Request, p Params) Response {
 	var res Response
+	res.Headers = Header{}
 	res.Code = http.StatusNoContent
 	return res
 })
@@ -118,6 +119,7 @@ func (m *MethodHandler) ServeHTTP(r *Request) Handler {
 	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Allow#Examples
 	return HandlerFunc(func(req *Request, p Params) Response {
 		var w Response
+		w.Headers = Header{}
 		w.Headers.Set("Allow", m.methodsAllowedStr)
 		w.Code = http.StatusMethodNotAllowed
 		w.Body = bytes.NewBufferString(http.StatusText(http.StatusMethodNotAllowed))
