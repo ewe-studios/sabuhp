@@ -281,7 +281,7 @@ func (m *Mux) Unlink() SubMux {
 }
 
 func redirect(r *Request, uri string, code int) Response {
-	var h Header
+	var h = Header{}
 	if u, err := url.Parse(uri); err == nil {
 		// If url was relative, make its path absolute by
 		// combining with request path.
