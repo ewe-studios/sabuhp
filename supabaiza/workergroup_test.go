@@ -2,7 +2,6 @@ package supabaiza_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -22,6 +21,9 @@ func createWorkerConfig(ctx context.Context, action supabaiza.Action, buffer int
 		Action:              action,
 		MaxWorkers:          max,
 		MessageDeliveryWait: time.Millisecond * 100,
+		EscalationHandler: func(escalation *supabaiza.Escalation, wk *supabaiza.WorkGroup) {
+
+		},
 	}
 }
 
@@ -54,10 +56,9 @@ func TestNewWorkGroup(t *testing.T) {
 		<-ack
 	}
 
-	var stats = group.Stat()
+	var stats = group.Stats()
 	group.Stop()
 
-	fmt.Printf("Check stats: %#v\n", stats)
 	require.Equal(t, 10, stats.TotalMessageReceived)
 	require.Equal(t, 10, stats.TotalMessageProcessed)
 }
@@ -81,7 +82,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 	var group = supabaiza.NewWorkGroup(config)
 	group.Start()
 
-	var stats = group.Stat()
+	var stats = group.Stats()
 	require.Equal(t, 2, stats.AvailableWorkerCapacity)
 	require.Equal(t, 1, stats.TotalCurrentWorkers)
 
@@ -103,13 +104,108 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 		<-ack
 	}
 
-	var stats2 = group.Stat()
+	var stats2 = group.Stats()
 	require.Equal(t, 0, stats2.AvailableWorkerCapacity)
 	require.Equal(t, 3, stats2.TotalCurrentWorkers)
 
 	group.Stop()
 
-	var stats3 = group.Stat()
+	var stats3 = group.Stats()
 	require.Equal(t, 10, stats3.TotalMessageReceived)
 	require.Equal(t, 10, stats3.TotalMessageProcessed)
+}
+
+func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
+	var config = createWorkerConfig(
+		context.Background(),
+		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+			panic("Killed to restart")
+		},
+		1,
+		3,
+	)
+
+	var notify = make(chan struct{}, 1)
+
+	config.MinWorker = 2
+	config.Behaviour = supabaiza.RestartAll
+	config.EscalationHandler = func(escalation *supabaiza.Escalation, wk *supabaiza.WorkGroup) {
+		require.NotNil(t, escalation)
+		require.NotNil(t, escalation.Data)
+		require.NotNil(t, escalation.OffendingMessage)
+		require.Equal(t, supabaiza.PanicProtocol, escalation.Protocol)
+
+		notify <- struct{}{}
+	}
+
+	var group = supabaiza.NewWorkGroup(config)
+	group.Start()
+
+	<-time.After(time.Second / 2)
+
+	var textPayload = supabaiza.TextPayload("Welcome to life")
+	require.NoError(t, group.HandleMessage(&supabaiza.Message{
+		Topic:    "find_user",
+		FromAddr: "component_1",
+		Payload:  textPayload,
+		Metadata: nil,
+	}))
+
+	<-notify
+
+	group.WaitRestart()
+
+	group.Stop()
+
+	var stats3 = group.Stats()
+	require.Equal(t, 4, stats3.TotalKilledWorkers)
+	require.Equal(t, 1, stats3.TotalEscalations)
+	require.Equal(t, 1, stats3.TotalRestarts)
+	require.Equal(t, 1, stats3.TotalPanics)
+}
+
+func TestNewWorkGroup_PanicStopAll(t *testing.T) {
+	var config = createWorkerConfig(
+		context.Background(),
+		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+			panic("Killed to restart")
+		},
+		1,
+		3,
+	)
+
+	var notify = make(chan struct{}, 1)
+
+	config.MinWorker = 2
+	config.Behaviour = supabaiza.StopAllAndEscalate
+	config.EscalationHandler = func(escalation *supabaiza.Escalation, wk *supabaiza.WorkGroup) {
+		require.NotNil(t, escalation)
+		require.NotNil(t, escalation.Data)
+		require.NotNil(t, escalation.OffendingMessage)
+		require.Equal(t, supabaiza.PanicProtocol, escalation.Protocol)
+
+		notify <- struct{}{}
+	}
+
+	var group = supabaiza.NewWorkGroup(config)
+	group.Start()
+
+	<-time.After(time.Second / 2)
+	var textPayload = supabaiza.TextPayload("Welcome to life")
+	require.NoError(t, group.HandleMessage(&supabaiza.Message{
+		Topic:    "find_user",
+		FromAddr: "component_1",
+		Payload:  textPayload,
+		Metadata: nil,
+	}))
+
+	<-notify
+
+	group.Wait()
+
+	var stats = group.Stats()
+	require.Equal(t, 2, stats.TotalKilledWorkers)
+	require.Equal(t, 1, stats.TotalEscalations)
+	require.Equal(t, 0, stats.TotalRestarts)
+	require.Equal(t, 1, stats.TotalPanics)
 }

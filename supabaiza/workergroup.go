@@ -63,7 +63,7 @@ type Escalation struct {
 	OffendingMessage *Message
 }
 
-type WorkerEscalationHandler func(escalation Escalation, wk *WorkGroup)
+type WorkerEscalationHandler func(escalation *Escalation, wk *WorkGroup)
 
 type WorkGroupConfig struct {
 	Addr                string
@@ -89,6 +89,9 @@ func (wc *WorkGroupConfig) ensure() {
 	}
 	if wc.Action == nil {
 		panic("WorkGroupConfig.Action must have provided")
+	}
+	if wc.EscalationHandler == nil {
+		panic("WorkGroupConfig.EscalationHandler must have provided")
 	}
 
 	if wc.MessageBufferSize <= 0 {
@@ -132,6 +135,7 @@ type WorkGroup struct {
 	totalEscalations  int64
 	totalPanics       int64
 	totalRestarts     int64
+	totalKilled       int64
 	availableSlots    int64
 	ctxCancelFn       func()
 	cancelDo          sync.Once
@@ -140,6 +144,7 @@ type WorkGroup struct {
 	config            WorkGroupConfig
 	waiter            sync.WaitGroup
 	workers           sync.WaitGroup
+	restartSignal     sync.WaitGroup
 	addWorker         chan struct{}
 	endWorker         chan struct{}
 	stoppedWorker     chan struct{}
@@ -179,12 +184,13 @@ type WorkerStat struct {
 	AvailableWorkerCapacity int
 	TotalCurrentWorkers     int
 	TotalCreatedWorkers     int
+	TotalKilledWorkers      int
 	TotalIdledWorkers       int
 	Instance                InstanceType
 	BehaviourType           BehaviourType
 }
 
-func (w *WorkGroup) Stat() WorkerStat {
+func (w *WorkGroup) Stats() WorkerStat {
 	var maxActive = atomic.LoadInt64(&w.activeWorkers)
 	var maxSlots = atomic.LoadInt64(&w.availableSlots)
 	var totalIdled = atomic.LoadInt64(&w.totalIdled)
@@ -194,6 +200,7 @@ func (w *WorkGroup) Stat() WorkerStat {
 	var totalEscalations = atomic.LoadInt64(&w.totalEscalations)
 	var totalPanics = atomic.LoadInt64(&w.totalPanics)
 	var totalRestarts = atomic.LoadInt64(&w.totalRestarts)
+	var totalKilled = atomic.LoadInt64(&w.totalKilled)
 
 	return WorkerStat{
 		Instance:                w.config.Instance,
@@ -201,6 +208,7 @@ func (w *WorkGroup) Stat() WorkerStat {
 		Addr:                    w.config.Addr,
 		MaxWorkers:              w.config.MaxWorkers,
 		MinWorkers:              w.config.MinWorker,
+		TotalKilledWorkers:      int(totalKilled),
 		TotalRestarts:           int(totalRestarts),
 		TotalPanics:             int(totalPanics),
 		TotalMessageReceived:    int(totalMessages),
@@ -228,8 +236,16 @@ func (w *WorkGroup) Stop() {
 	w.waiter.Wait()
 }
 
+// Wait block till the group is stopped or killed
 func (w *WorkGroup) Wait() {
+	w.workers.Wait()
 	w.waiter.Wait()
+}
+
+// WaitRestart will block if there is a restart
+// process occurring when it's called.
+func (w *WorkGroup) WaitRestart() {
+	w.restartSignal.Wait()
 }
 
 func (w *WorkGroup) HandleMessage(message *Message) error {
@@ -275,18 +291,23 @@ func (w *WorkGroup) doWork() {
 		// signal active and available slots.
 		atomic.AddInt64(&w.activeWorkers, -1)
 		atomic.AddInt64(&w.availableSlots, 1)
+		atomic.AddInt64(&w.totalKilled, 1)
 
 		// we still want to recover in-case of a panic
 		var err = recover()
-		if w.isRestarting() {
-			return
-		}
-
 		if err != nil {
 			atomic.AddInt64(&w.totalPanics, 1)
 		}
 
-		if err != nil && w.config.Behaviour != RestartOne {
+		if w.isRestarting() {
+
+			// signal wait group
+			w.workers.Done()
+
+			return
+		}
+
+		if err != nil {
 			// send to escalation channel.
 			var esc = Escalation{
 				Err:              nerror.New("panic occurred"),
@@ -370,23 +391,19 @@ manageLoop:
 			go w.bootMinWorker()
 		case esc := <-w.escalationChannel:
 			atomic.AddInt64(&w.totalEscalations, 1)
-			go w.config.EscalationHandler(esc, w)
 
 			switch behaviour {
 			case RestartAll:
 				atomic.AddInt64(&w.totalRestarts, 1)
 				w.enterRestart()
+				go w.config.EscalationHandler(&esc, w)
 				break manageLoop
 			case StopAllAndEscalate:
+				esc.PendingMessages = w.jobs
+
 				w.cancelDo.Do(func() {
 					w.ctxCancelFn()
-
-					atomic.AddInt64(&w.totalEscalations, 1)
-					go w.config.EscalationHandler(Escalation{
-						Err:             nerror.New("ending worker and escalating"),
-						PendingMessages: w.jobs,
-						Protocol:        KillAndEscalateProtocol,
-					}, w)
+					go w.config.EscalationHandler(&esc, w)
 				})
 				break manageLoop
 			case DoNothing:
@@ -406,6 +423,7 @@ func (w *WorkGroup) restartAll() {
 	go w.manage()
 	w.endRestart()
 	w.bootMinWorker()
+	w.restartSignal.Done()
 }
 
 func (w *WorkGroup) isRestarting() bool {
@@ -422,6 +440,7 @@ func (w *WorkGroup) enterRestart() {
 	w.rm.Lock()
 	w.restarting = true
 	w.rm.Unlock()
+	w.restartSignal.Add(1)
 }
 
 func (w *WorkGroup) endRestart() {
@@ -433,7 +452,14 @@ func (w *WorkGroup) endRestart() {
 func (w *WorkGroup) endWorkers() {
 	var maxActive = int(atomic.LoadInt64(&w.activeWorkers))
 	for i := 0; i < maxActive; i++ {
-		w.endWorker <- struct{}{}
+		select {
+		case <-w.context.Done():
+			// if context was cancelled then workers would
+			// not need endworker signal
+			return
+		case w.endWorker <- struct{}{}:
+		}
+
 	}
 }
 
