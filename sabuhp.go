@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/influx6/npkg/njson"
 )
 
 type Params map[string]string
@@ -58,6 +60,10 @@ type HandlerFunc func(req *Request, params Params) Response
 
 func (h HandlerFunc) Handle(req *Request, params Params) Response {
 	return h(req, params)
+}
+
+type Logger interface {
+	Log(json *njson.JSON)
 }
 
 // Transport defines what we expect from a handler of requests.

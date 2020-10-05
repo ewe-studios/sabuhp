@@ -35,10 +35,16 @@ const (
 	StopAllAndEscalate
 )
 
+type WorkerProtocol int
+
+const (
+	PanicProtocol WorkerProtocol = iota
+)
+
 type EscalationProtocol int
 
 const (
-	PanicProtocol EscalationProtocol = iota
+	RestartProtocol EscalationProtocol = iota
 	KillAndEscalateProtocol
 )
 
@@ -50,8 +56,12 @@ type Escalation struct {
 	// of recover() for a panic protocol.
 	Data interface{}
 
-	// Protocol is the escalation protocol being communicated.
-	Protocol EscalationProtocol
+	// WorkerProtocol is the escalation protocol communicated by the worker.
+	WorkerProtocol WorkerProtocol
+
+	// GroupProtocol is the escalation protocol being used by the worker group
+	// for handling the worker protocol.
+	GroupProtocol EscalationProtocol
 
 	// PendingMessages are the messages left to be processed when
 	// an escalation occurred. It's only set when it's a KillAndEscalate
@@ -63,9 +73,9 @@ type Escalation struct {
 	OffendingMessage *Message
 }
 
-type WorkerEscalationHandler func(escalation *Escalation, wk *WorkGroup)
+type WorkerEscalationHandler func(escalation *Escalation, wk *ActionWorkerGroup)
 
-type WorkGroupConfig struct {
+type ActionWorkerConfig struct {
 	Addr                string
 	MessageBufferSize   int
 	Action              Action
@@ -80,18 +90,18 @@ type WorkGroupConfig struct {
 	MessageDeliveryWait time.Duration
 }
 
-func (wc *WorkGroupConfig) ensure() {
+func (wc *ActionWorkerConfig) ensure() {
 	if wc.Addr == "" {
-		panic("WorkGroupConfig.Addr must be provided")
+		panic("ActionWorkerConfig.Addr must be provided")
 	}
 	if wc.Context == nil {
-		panic("WorkGroupConfig.Context must be provided")
+		panic("ActionWorkerConfig.Context must be provided")
 	}
 	if wc.Action == nil {
-		panic("WorkGroupConfig.Action must have provided")
+		panic("ActionWorkerConfig.Action must have provided")
 	}
 	if wc.EscalationHandler == nil {
-		panic("WorkGroupConfig.EscalationHandler must have provided")
+		panic("ActionWorkerConfig.EscalationHandler must have provided")
 	}
 
 	if wc.MessageBufferSize <= 0 {
@@ -121,12 +131,12 @@ func (wc *WorkGroupConfig) ensure() {
 	}
 }
 
-// WorkGroup embodies a small action based workgroup which at their default
+// ActionWorkerGroup embodies a small action based workgroup which at their default
 // state are scaling functions for execution across their maximum allowed
-// range. WorkGroup provide other settings like SingleInstance where only
+// range. ActionWorkerGroup provide other settings like SingleInstance where only
 // one function is allowed or OneTime instance type where for a function
 // runs once and dies off.
-type WorkGroup struct {
+type ActionWorkerGroup struct {
 	activeWorkers     int64
 	totalIdled        int64
 	totalCreated      int64
@@ -141,7 +151,7 @@ type WorkGroup struct {
 	cancelDo          sync.Once
 	starterDo         sync.Once
 	context           context.Context
-	config            WorkGroupConfig
+	config            ActionWorkerConfig
 	waiter            sync.WaitGroup
 	workers           sync.WaitGroup
 	restartSignal     sync.WaitGroup
@@ -154,12 +164,12 @@ type WorkGroup struct {
 	restarting        bool
 }
 
-func NewWorkGroup(config WorkGroupConfig) *WorkGroup {
+func NewWorkGroup(config ActionWorkerConfig) *ActionWorkerGroup {
 	config.ensure()
 
 	var ctx, cancelFn = context.WithCancel(config.Context)
 
-	var w WorkGroup
+	var w ActionWorkerGroup
 	w.context = ctx
 	w.config = config
 	w.ctxCancelFn = cancelFn
@@ -190,7 +200,7 @@ type WorkerStat struct {
 	BehaviourType           BehaviourType
 }
 
-func (w *WorkGroup) Stats() WorkerStat {
+func (w *ActionWorkerGroup) Stats() WorkerStat {
 	var maxActive = atomic.LoadInt64(&w.activeWorkers)
 	var maxSlots = atomic.LoadInt64(&w.availableSlots)
 	var totalIdled = atomic.LoadInt64(&w.totalIdled)
@@ -221,14 +231,14 @@ func (w *WorkGroup) Stats() WorkerStat {
 	}
 }
 
-func (w *WorkGroup) Start() {
+func (w *ActionWorkerGroup) Start() {
 	w.starterDo.Do(func() {
-		go w.manage()
+		w.startManager()
 		w.bootMinWorker()
 	})
 }
 
-func (w *WorkGroup) Stop() {
+func (w *ActionWorkerGroup) Stop() {
 	w.cancelDo.Do(func() {
 		w.ctxCancelFn()
 	})
@@ -237,20 +247,23 @@ func (w *WorkGroup) Stop() {
 }
 
 // Wait block till the group is stopped or killed
-func (w *WorkGroup) Wait() {
+func (w *ActionWorkerGroup) Wait() {
 	w.workers.Wait()
 	w.waiter.Wait()
 }
 
 // WaitRestart will block if there is a restart
 // process occurring when it's called.
-func (w *WorkGroup) WaitRestart() {
+func (w *ActionWorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *WorkGroup) HandleMessage(message *Message) error {
+func (w *ActionWorkerGroup) HandleMessage(message *Message) error {
 	if message.Ack != nil && cap(message.Ack) == 0 {
-		panic("Message ack channels must have capacity of 1 atleast")
+		panic("Message.Ack channels must have capacity of 1 atleast")
+	}
+	if message.Nack != nil && cap(message.Nack) == 0 {
+		panic("Message.Nack channels must have capacity of 1 atleast")
 	}
 
 	// attempt to handle message, if after 2 seconds,
@@ -280,8 +293,12 @@ func (w *WorkGroup) HandleMessage(message *Message) error {
 	}
 }
 
-func (w *WorkGroup) doWork() {
+func (w *ActionWorkerGroup) beginWork() {
 	w.workers.Add(1)
+	go w.doWork()
+}
+
+func (w *ActionWorkerGroup) doWork() {
 	atomic.AddInt64(&w.activeWorkers, 1)
 	atomic.AddInt64(&w.availableSlots, -1)
 
@@ -299,6 +316,11 @@ func (w *WorkGroup) doWork() {
 			atomic.AddInt64(&w.totalPanics, 1)
 		}
 
+		// Users must be careful here.
+		if currentMessage != nil && currentMessage.Nack != nil {
+			currentMessage.Nack <- struct{}{}
+		}
+
 		if w.isRestarting() {
 
 			// signal wait group
@@ -312,7 +334,7 @@ func (w *WorkGroup) doWork() {
 			var esc = Escalation{
 				Err:              nerror.New("panic occurred"),
 				OffendingMessage: currentMessage,
-				Protocol:         PanicProtocol,
+				WorkerProtocol:   PanicProtocol,
 				Data:             err,
 			}
 
@@ -372,8 +394,12 @@ func (w *WorkGroup) doWork() {
 	}
 }
 
-func (w *WorkGroup) manage() {
+func (w *ActionWorkerGroup) startManager() {
 	w.waiter.Add(1)
+	go w.manage()
+}
+
+func (w *ActionWorkerGroup) manage() {
 	defer w.waiter.Done()
 
 	var ctx = w.context
@@ -386,7 +412,7 @@ manageLoop:
 			return
 		case <-w.addWorker:
 			atomic.AddInt64(&w.totalCreated, 1)
-			go w.doWork()
+			w.beginWork()
 		case <-w.stoppedWorker:
 			go w.bootMinWorker()
 		case esc := <-w.escalationChannel:
@@ -396,10 +422,13 @@ manageLoop:
 			case RestartAll:
 				atomic.AddInt64(&w.totalRestarts, 1)
 				w.enterRestart()
+
+				esc.GroupProtocol = RestartProtocol
 				go w.config.EscalationHandler(&esc, w)
 				break manageLoop
 			case StopAllAndEscalate:
 				esc.PendingMessages = w.jobs
+				esc.GroupProtocol = KillAndEscalateProtocol
 
 				w.cancelDo.Do(func() {
 					w.ctxCancelFn()
@@ -418,15 +447,15 @@ manageLoop:
 	}
 }
 
-func (w *WorkGroup) restartAll() {
+func (w *ActionWorkerGroup) restartAll() {
 	w.workers.Wait()
-	go w.manage()
+	go w.startManager()
 	w.endRestart()
 	w.bootMinWorker()
 	w.restartSignal.Done()
 }
 
-func (w *WorkGroup) isRestarting() bool {
+func (w *ActionWorkerGroup) isRestarting() bool {
 	w.rm.Lock()
 	if w.restarting {
 		w.rm.Unlock()
@@ -436,26 +465,26 @@ func (w *WorkGroup) isRestarting() bool {
 	return false
 }
 
-func (w *WorkGroup) enterRestart() {
+func (w *ActionWorkerGroup) enterRestart() {
 	w.rm.Lock()
 	w.restarting = true
 	w.rm.Unlock()
 	w.restartSignal.Add(1)
 }
 
-func (w *WorkGroup) endRestart() {
+func (w *ActionWorkerGroup) endRestart() {
 	w.rm.Lock()
 	w.restarting = false
 	w.rm.Unlock()
 }
 
-func (w *WorkGroup) endWorkers() {
+func (w *ActionWorkerGroup) endWorkers() {
 	var maxActive = int(atomic.LoadInt64(&w.activeWorkers))
 	for i := 0; i < maxActive; i++ {
 		select {
 		case <-w.context.Done():
 			// if context was cancelled then workers would
-			// not need endworker signal
+			// not need end worker signal
 			return
 		case w.endWorker <- struct{}{}:
 		}
@@ -463,7 +492,7 @@ func (w *WorkGroup) endWorkers() {
 	}
 }
 
-func (w *WorkGroup) bootMinWorker() {
+func (w *ActionWorkerGroup) bootMinWorker() {
 	if w.isRestarting() {
 		return
 	}
