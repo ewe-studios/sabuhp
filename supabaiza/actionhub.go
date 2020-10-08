@@ -74,7 +74,10 @@ func (ar *WorkerTemplateRegistry) Delete(actionName string) {
 	delete(ar.templates, actionName)
 }
 
-func (ar *WorkerTemplateRegistry) Register(actionName string, template ActionWorkerRequest) {
+func (ar *WorkerTemplateRegistry) Register(template ActionWorkerRequest) {
+	if len(template.ActionName) == 0 || strings.TrimSpace(template.ActionName) == "" {
+		panic("ActionWorkerRequest.ActionName should have no value when using the registry")
+	}
 	if template.Err != nil {
 		panic("ActionWorkerRequest.Err should have no value when using the registry")
 	}
@@ -84,10 +87,10 @@ func (ar *WorkerTemplateRegistry) Register(actionName string, template ActionWor
 	if strings.TrimSpace(template.ActionName) == "" {
 		panic("ActionWorkerRequest.ActionName must be provided")
 	}
-	ar.templates[actionName] = template
+	ar.templates[template.ActionName] = template
 }
 
-type EscalationHandler func(escalation Escalation, hub ActionHub)
+type EscalationHandler func(escalation Escalation, hub *ActionHub)
 
 // ActionHub is a worker pool supervisor which sits to manage
 // the execution of functions deployed for processing of messages
@@ -122,9 +125,9 @@ func NewActionHub(
 	pubsub PubSub,
 	logger sabuhp.Logger,
 ) *ActionHub {
-	var context, cancelFn = context.WithCancel(ctx)
+	var cntx, cancelFn = context.WithCancel(ctx)
 	return &ActionHub{
-		Context:        context,
+		Context:        cntx,
 		Logger:         logger,
 		CancelFn:       cancelFn,
 		Pubsub:         pubsub,
@@ -151,6 +154,21 @@ func NewActionHub(
 // in the workers template registry as well.
 func (ah *ActionHub) Do(actionName string, creator ActionWorkerGroupCreator) error {
 	return ah.do(actionName, actionName, creator)
+}
+
+// DoAlias registers a WorkerCreator based on the action name but instead of using the action
+// name as the pubsub topic, uses the value of pubsubTopic provided allowing you to link
+// an action work group to an external pre-defined topic.
+//
+// We always encourage the actionName to be the topic because they based on configuration are able
+// to scale without the need to spawn separate work groups. But there will be cases for the need
+// to provide support to handle outside events that may not necessary be termed with the action name
+// due to lack of control or due to integration, hence DoAlias exists for this.
+//
+// The general rule is when you can control the topic name, use the actionName, and if you don't
+// know which to use, then its a safe bet to say: just use the action name, hence using ActionHub.Do.
+func (ah *ActionHub) DoAlias(actionName string, pubsubTopic string, creator ActionWorkerGroupCreator) error {
+	return ah.do(actionName, pubsubTopic, creator)
 }
 
 // do handles registration of a giving worker requests, if the actionName already exits
@@ -305,6 +323,7 @@ func (ah *ActionHub) createAutoActionWorker(req ActionWorkerRequest) {
 	})
 
 	ah.addWorkerChannel(req.PubSubTopic, workerChannel)
+	close(req.Err)
 }
 
 func (ah *ActionHub) createActionWorker(req ActionWorkerRequest) {
@@ -327,6 +346,7 @@ func (ah *ActionHub) createActionWorker(req ActionWorkerRequest) {
 	})
 
 	ah.addWorkerChannel(req.PubSubTopic, workerChannel)
+	close(req.Err)
 }
 
 func (ah *ActionHub) manageWorker(group *ActionWorkerGroup) {
@@ -359,7 +379,7 @@ func (ah *ActionHub) getWorkerGroup(actionName string) *ActionWorkerGroup {
 	{
 		workerGroup = ah.workerGroupInstances[actionName]
 	}
-	ah.workerInstancesMutex.RLock()
+	ah.workerInstancesMutex.RUnlock()
 	return workerGroup
 }
 
@@ -369,7 +389,7 @@ func (ah *ActionHub) hasWorkerGroup(actionName string) bool {
 	{
 		_, hasWorkerGroup = ah.workerGroupInstances[actionName]
 	}
-	ah.workerInstancesMutex.RLock()
+	ah.workerInstancesMutex.RUnlock()
 	return hasWorkerGroup
 }
 
@@ -379,7 +399,7 @@ func (ah *ActionHub) hasWorkerChannel(channelTopic string) bool {
 	{
 		_, hasWorkerGroup = ah.workerGroupChannels[channelTopic]
 	}
-	ah.workerChannelMutex.RLock()
+	ah.workerChannelMutex.RUnlock()
 	return hasWorkerGroup
 }
 
@@ -388,7 +408,7 @@ func (ah *ActionHub) addWorkerGroup(actionName string, group *ActionWorkerGroup)
 	{
 		ah.workerGroupInstances[actionName] = group
 	}
-	ah.workerInstancesMutex.Lock()
+	ah.workerInstancesMutex.Unlock()
 }
 
 func (ah *ActionHub) addWorkerChannel(channelTopic string, channel Channel) {
@@ -396,7 +416,7 @@ func (ah *ActionHub) addWorkerChannel(channelTopic string, channel Channel) {
 	{
 		ah.workerGroupChannels[channelTopic] = channel
 	}
-	ah.workerChannelMutex.Lock()
+	ah.workerChannelMutex.Unlock()
 }
 
 func (ah *ActionHub) closeWorkerChannel(channelTopic string) {
@@ -413,7 +433,7 @@ func (ah *ActionHub) closeWorkerChannel(channelTopic string) {
 			delete(ah.workerGroupChannels, channelTopic)
 		}
 	}
-	ah.workerChannelMutex.Lock()
+	ah.workerChannelMutex.Unlock()
 
 	if hasChannel && !isAutoChannel {
 		channel.Close()
@@ -426,7 +446,7 @@ func (ah *ActionHub) getWorkerChannel(channelTopic string) Channel {
 	{
 		channel = ah.workerGroupChannels[channelTopic]
 	}
-	ah.workerChannelMutex.RLock()
+	ah.workerChannelMutex.RUnlock()
 	return channel
 }
 
@@ -436,7 +456,7 @@ func (ah *ActionHub) isAutoChannel(channelTopic string) bool {
 	{
 		isAuto = ah.autoChannels[channelTopic]
 	}
-	ah.workerChannelMutex.RLock()
+	ah.workerChannelMutex.RUnlock()
 	return isAuto
 }
 
