@@ -76,6 +76,7 @@ type Escalation struct {
 type WorkerEscalationHandler func(escalation *Escalation, wk *ActionWorkerGroup)
 
 type ActionWorkerConfig struct {
+	ActionName          string
 	Addr                string
 	MessageBufferSize   int
 	Action              Action
@@ -91,6 +92,9 @@ type ActionWorkerConfig struct {
 }
 
 func (wc *ActionWorkerConfig) ensure() {
+	if wc.ActionName == "" {
+		panic("ActionWorkerConfig.ActionName must be provided")
+	}
 	if wc.Addr == "" {
 		panic("ActionWorkerConfig.Addr must be provided")
 	}
@@ -231,6 +235,10 @@ func (w *ActionWorkerGroup) Stats() WorkerStat {
 	}
 }
 
+func (w *ActionWorkerGroup) Ctx() context.Context {
+	return w.context
+}
+
 func (w *ActionWorkerGroup) Start() {
 	w.starterDo.Do(func() {
 		w.startManager()
@@ -287,7 +295,7 @@ func (w *ActionWorkerGroup) HandleMessage(message *Message) error {
 
 	select {
 	case <-w.context.Done():
-		return nerror.New("failed to handle message")
+		return nerror.New("failed to handle message from %q", w.config.ActionName)
 	case w.jobs <- message:
 		return nil
 	}
@@ -513,4 +521,45 @@ func (w *ActionWorkerGroup) bootMinWorker() {
 			}
 		}
 	}
+}
+
+// MasterWorkerGroup implements a group of worker-group nodes where
+// a master node has specific actions group along as dependent actions
+// where the death of the master leads to the death of the slaves.
+type MasterWorkerGroup struct {
+	Master *ActionWorkerGroup
+	Slaves map[string]*ActionWorkerGroup
+}
+
+func (mg *MasterWorkerGroup) AddSlave(slave *ActionWorkerGroup) {
+	mg.Slaves[slave.config.Addr] = slave
+}
+
+func (mg *MasterWorkerGroup) Start() {
+	mg.Master.Start()
+	for _, slave := range mg.Slaves {
+		slave.Start()
+	}
+}
+
+func (mg *MasterWorkerGroup) Stop() {
+	var waiter sync.WaitGroup
+
+	// close the master worker group.
+	waiter.Add(1)
+	go func() {
+		defer waiter.Done()
+		mg.Master.Stop()
+	}()
+
+	// close all slave workgroup.
+	for _, slave := range mg.Slaves {
+		waiter.Add(1)
+		go func(slaveGroup *ActionWorkerGroup) {
+			defer waiter.Done()
+			slaveGroup.Stop()
+		}(slave)
+	}
+
+	waiter.Wait()
 }

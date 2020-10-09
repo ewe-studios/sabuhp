@@ -2,8 +2,11 @@ package supabaiza_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/opentracing/opentracing-go/log"
 
 	"github.com/stretchr/testify/require"
 
@@ -132,18 +135,23 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	hub.Wait()
 }
 
-func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
+func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	var escalationHandling = func(escalation supabaiza.Escalation, hub *supabaiza.ActionHub) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, hub)
 	}
 
+	var sl sync.Mutex
 	var sendList []*supabaiza.Message
+
+	var chl sync.Mutex
 	var channels []Sub
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	pubsub.SendFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+		sl.Lock()
+		defer sl.Unlock()
 		sendList = append(sendList, message)
 		for _, channel := range channels {
 			if channel.Topic == message.Topic {
@@ -153,6 +161,100 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 		return nil
 	}
 	pubsub.ChannelFunc = func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
+		chl.Lock()
+		defer chl.Unlock()
+		var noChannel NoPubSubChannel
+		channels = append(channels, Sub{
+			Topic:    topic,
+			Callback: callback,
+			Channel:  &noChannel,
+		})
+		return &noChannel
+	}
+
+	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
+	var ctx, canceler = context.WithCancel(context.Background())
+	var hub = supabaiza.NewActionHub(
+		ctx,
+		escalationHandling,
+		templateRegistry,
+		pubsub,
+		logger,
+	)
+
+	hub.Start()
+
+	require.NoError(t, hub.Do("say_hello", sayHelloAction, supabaiza.SlaveWorkerRequest{
+		ActionName: "hello_slave",
+		Action: func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+			if err := pubsub.Send(&supabaiza.Message{
+				Topic:    "say_hello",
+				FromAddr: to,
+				Payload:  supabaiza.BinaryPayload("slave from hello"),
+				Metadata: nil,
+				Ack:      nil,
+				Nack:     nil,
+			}, 0); err != nil {
+				log.Error(err)
+			}
+		},
+	}))
+
+	chl.Lock()
+	require.Len(t, channels, 2)
+	chl.Unlock()
+
+	var ack = make(chan struct{}, 1)
+	require.NoError(t, pubsub.Send(&supabaiza.Message{
+		FromAddr: "yay",
+		Topic:    "say_hello/slaves/hello_slave",
+		Payload:  supabaiza.BinaryPayload("alex"),
+		Metadata: nil,
+		Ack:      ack,
+		Nack:     nil,
+	}, 0))
+
+	<-ack
+
+	sl.Lock()
+	require.Len(t, sendList, 2)
+	require.Equal(t, "say_hello/slaves/hello_slave", sendList[0].Topic)
+	require.Equal(t, "say_hello", sendList[1].Topic)
+	sl.Unlock()
+
+	canceler()
+	hub.Wait()
+}
+
+func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
+	var escalationHandling = func(escalation supabaiza.Escalation, hub *supabaiza.ActionHub) {
+		require.NotNil(t, escalation)
+		require.NotNil(t, hub)
+	}
+
+	var sl sync.Mutex
+	var sendList []*supabaiza.Message
+
+	var chl sync.Mutex
+	var channels []Sub
+
+	var logger = &LoggerPub{}
+	var pubsub = &NoPubSub{}
+	pubsub.SendFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+		sl.Lock()
+		defer sl.Unlock()
+
+		sendList = append(sendList, message)
+		for _, channel := range channels {
+			if channel.Topic == message.Topic {
+				channel.Callback(message, pubsub)
+			}
+		}
+		return nil
+	}
+	pubsub.ChannelFunc = func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
+		chl.Lock()
+		defer chl.Unlock()
 		var noChannel NoPubSubChannel
 		channels = append(channels, Sub{
 			Topic:    topic,
@@ -175,7 +277,10 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	hub.Start()
 
 	require.NoError(t, hub.Do("say_hello", sayHelloAction))
+
+	chl.Lock()
 	require.Len(t, channels, 1)
+	chl.Unlock()
 
 	var ack = make(chan struct{}, 1)
 	require.NoError(t, pubsub.Send(&supabaiza.Message{
@@ -189,9 +294,11 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 
 	<-ack
 
+	sl.Lock()
 	require.Len(t, sendList, 2)
 	require.Equal(t, "say_hello", sendList[0].Topic)
 	require.Equal(t, "yay", sendList[1].Topic)
+	sl.Unlock()
 
 	canceler()
 	hub.Wait()

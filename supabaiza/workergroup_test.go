@@ -18,6 +18,7 @@ func createWorkerConfig(ctx context.Context, action supabaiza.Action, buffer int
 		MessageBufferSize:   buffer,
 		Pubsub:              &NoPubSub{},
 		Addr:                testName,
+		ActionName:          testName,
 		Action:              action,
 		MaxWorkers:          max,
 		MessageDeliveryWait: time.Millisecond * 100,

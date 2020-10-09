@@ -49,6 +49,11 @@ type Message struct {
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
 
+	// SystemAlerts indicates to the executing service to
+	// resend a system message for a possible failure of
+	// a giving message.
+	SystemAlerts bool
+
 	// Ack allows you to request acknowledgement that message
 	// was processed, if provided. Our advice is to always
 	// ensure your ack is a buffered channel of 1 capacity.

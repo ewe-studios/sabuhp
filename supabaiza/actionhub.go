@@ -2,8 +2,10 @@ package supabaiza
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
@@ -19,11 +21,43 @@ type Action func(ctx context.Context, to string, message *Message, pubsub PubSub
 // a ActionWorkerGroup which will be managed by the a ActionHub.
 type ActionWorkerGroupCreator func(config ActionWorkerConfig) *ActionWorkerGroup
 
+type SlaveWorkerRequest struct {
+	// ActionName represent the action name for this
+	// request work group, which identifiers in cases
+	// where the PubSubAddress has no value is the
+	// topic to listen for messages on.
+	ActionName string
+
+	// WorkerCreator is the creation function which will be supplied
+	// the initial ActionWorkerConfig which should be populated accordingly
+	// by the creator to create and return a ActionWorkerGroup which will
+	// service all messages for this action.
+	Action Action
+
+	// Attributes which are allowed for configuration in the WorkerGroupCreator
+	// as slaves are very special, users do not have rights to decide their behaviour
+	// and instance types.
+	MessageBufferSize   int
+	MinWorker           int
+	MaxWorkers          int
+	MaxIdleness         time.Duration
+	MessageDeliveryWait time.Duration
+}
+
+func (wc *SlaveWorkerRequest) ensure() {
+	if wc.ActionName == "" {
+		panic("ActionWorkerConfig.ActionName must be provided")
+	}
+	if wc.Action == nil {
+		panic("ActionWorkerConfig.Action must have provided")
+	}
+}
+
 // ActionWorkerRequest defines a request template used by the ActionHub to
 // request the creation of a worker group for a giving action.
 type ActionWorkerRequest struct {
 	// Err provides a means of response detailing possible error
-	// that occurred during the processing of this request.
+	// that occurred during the processing of this creating the worker.
 	Err chan error
 
 	// ActionName represent the action name for this
@@ -42,6 +76,44 @@ type ActionWorkerRequest struct {
 	// by the creator to create and return a ActionWorkerGroup which will
 	// service all messages for this action.
 	WorkerCreator ActionWorkerGroupCreator
+
+	// Slaves are personalized workers we want generated with this worker.
+	// Slaves have strict naming format which will be generated automatically
+	// internally.
+	//
+	// Name format: [MasterActionName]/slaves/[SlaveActionName]
+	//
+	// WARNING: Use sparingly, most of your use case are doable with shared
+	// workgroups.
+	//
+	// There are cases where we want a worker specific for a work group
+	// which can be used to hand off specific tasks to, this then allows
+	// specific and limited use around non-generalistic cases.
+	//
+	// Example of such is a dangerous operation that is not intrinsic to
+	// the behaviour of the action but must be done, this can be offloaded
+	// to the slaves who will always be running and are never ever going
+	// die (cause they will be restarted and respawned). They will exists
+	// as far as the master exists.
+	Slaves []SlaveWorkerRequest
+}
+
+func (wc *ActionWorkerRequest) ensure() {
+	if wc.ActionName == "" {
+		panic("ActionWorkerConfig.ActionName must be provided")
+	}
+	if strings.TrimSpace(wc.ActionName) == "" {
+		panic("ActionWorkerRequest.ActionName must be provided")
+	}
+	if wc.PubSubTopic == "" {
+		panic("ActionWorkerConfig.PubSubTopic must be provided")
+	}
+	if wc.WorkerCreator == nil {
+		panic("ActionWorkerConfig.WorkerCreator must be provided")
+	}
+	for _, slaveRequest := range wc.Slaves {
+		slaveRequest.ensure()
+	}
 }
 
 // WorkerTemplateRegistry implements a registry of ActionWorkerRequest templates
@@ -75,18 +147,11 @@ func (ar *WorkerTemplateRegistry) Delete(actionName string) {
 }
 
 func (ar *WorkerTemplateRegistry) Register(template ActionWorkerRequest) {
-	if len(template.ActionName) == 0 || strings.TrimSpace(template.ActionName) == "" {
-		panic("ActionWorkerRequest.ActionName should have no value when using the registry")
-	}
+	template.ensure()
 	if template.Err != nil {
-		panic("ActionWorkerRequest.Err should have no value when using the registry")
+		panic("ActionWorkerConfig.Err must not be provided")
 	}
-	if template.WorkerCreator == nil {
-		panic("ActionWorkerRequest.WorkerCreator must be provided")
-	}
-	if strings.TrimSpace(template.ActionName) == "" {
-		panic("ActionWorkerRequest.ActionName must be provided")
-	}
+
 	ar.templates[template.ActionName] = template
 }
 
@@ -109,8 +174,11 @@ type ActionHub struct {
 	escalationCommands chan Escalation
 	waiter             sync.WaitGroup
 
-	workerInstancesMutex sync.RWMutex
-	workerGroupInstances map[string]*ActionWorkerGroup
+	masterGroupsMutex sync.RWMutex
+	masterGroups      map[string]*MasterWorkerGroup
+
+	//workerInstancesMutex sync.RWMutex
+	//workerGroupInstances map[string]*ActionWorkerGroup
 
 	workerChannelMutex  sync.RWMutex
 	workerGroupChannels map[string]Channel
@@ -152,8 +220,8 @@ func NewActionHub(
 //
 // Do be aware the actionName is very unique and must be different from others both
 // in the workers template registry as well.
-func (ah *ActionHub) Do(actionName string, creator ActionWorkerGroupCreator) error {
-	return ah.do(actionName, actionName, creator)
+func (ah *ActionHub) Do(actionName string, creator ActionWorkerGroupCreator, slaves ...SlaveWorkerRequest) error {
+	return ah.do(actionName, actionName, creator, slaves...)
 }
 
 // DoAlias registers a WorkerCreator based on the action name but instead of using the action
@@ -167,19 +235,32 @@ func (ah *ActionHub) Do(actionName string, creator ActionWorkerGroupCreator) err
 //
 // The general rule is when you can control the topic name, use the actionName, and if you don't
 // know which to use, then its a safe bet to say: just use the action name, hence using ActionHub.Do.
-func (ah *ActionHub) DoAlias(actionName string, pubsubTopic string, creator ActionWorkerGroupCreator) error {
-	return ah.do(actionName, pubsubTopic, creator)
+func (ah *ActionHub) DoAlias(
+	actionName string,
+	pubsubTopic string,
+	creator ActionWorkerGroupCreator,
+	slaves ...SlaveWorkerRequest,
+) error {
+	return ah.do(actionName, pubsubTopic, creator, slaves...)
 }
 
 // do handles registration of a giving worker requests, if the actionName already exits
 // and is in use (as this represents the worker group then, it will fail with an error.
-func (ah *ActionHub) do(actionName string, pubsubTopic string, creator ActionWorkerGroupCreator) error {
+func (ah *ActionHub) do(
+	actionName string,
+	pubsubTopic string,
+	creator ActionWorkerGroupCreator,
+	slaves ...SlaveWorkerRequest,
+) error {
 	var req = ActionWorkerRequest{
 		ActionName:    actionName,
 		PubSubTopic:   pubsubTopic,
 		WorkerCreator: creator,
 		Err:           make(chan error),
+		Slaves:        slaves,
 	}
+
+	req.ensure()
 
 	select {
 	case <-ah.Context.Done():
@@ -212,8 +293,8 @@ func (ah *ActionHub) Stop() {
 }
 
 func (ah *ActionHub) init() {
-	if ah.workerGroupInstances == nil {
-		ah.workerGroupInstances = map[string]*ActionWorkerGroup{}
+	if ah.masterGroups == nil {
+		ah.masterGroups = map[string]*MasterWorkerGroup{}
 	}
 	if ah.workerGroupChannels == nil {
 		ah.workerGroupChannels = map[string]Channel{}
@@ -276,31 +357,16 @@ func (ah *ActionHub) createAutoActionWorkers() {
 	}
 }
 
-func (ah *ActionHub) createWorkerGroup(req ActionWorkerRequest) *ActionWorkerGroup {
-	var workerConfig = ActionWorkerConfig{
-		Pubsub:            ah.Pubsub,
-		Context:           ah.Context,
-		Addr:              req.PubSubTopic,
-		EscalationHandler: ah.handleEscalation,
-	}
-
-	var workerGroup = req.WorkerCreator(workerConfig)
-	ah.addWorkerGroup(req.ActionName, workerGroup)
-
-	go ah.manageWorker(workerGroup)
-	return workerGroup
-}
-
 func (ah *ActionHub) createAutoActionWorker(req ActionWorkerRequest) {
 	var logger = ah.Logger
 	var workerChannel = ah.Pubsub.Channel(req.PubSubTopic, func(data *Message, sub PubSub) {
 
 		// get or create worker group for request topic
-		var workerGroup *ActionWorkerGroup
-		if !ah.hasWorkerGroup(req.ActionName) {
-			workerGroup = ah.createWorkerGroup(req)
+		var workerGroup *MasterWorkerGroup
+		if !ah.hasMasterGroup(req.ActionName) {
+			workerGroup = ah.createMasterGroup(req)
 		} else {
-			workerGroup = ah.getWorkerGroup(req.ActionName)
+			workerGroup = ah.getMasterGroup(req.ActionName)
 		}
 
 		// if it's still nil then (should be impossible)
@@ -312,7 +378,7 @@ func (ah *ActionHub) createAutoActionWorker(req ActionWorkerRequest) {
 			return
 		}
 
-		if err := workerGroup.HandleMessage(data); err != nil {
+		if err := workerGroup.Master.HandleMessage(data); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
 				event.Bool("auto_action", true)
@@ -328,15 +394,15 @@ func (ah *ActionHub) createAutoActionWorker(req ActionWorkerRequest) {
 
 func (ah *ActionHub) createActionWorker(req ActionWorkerRequest) {
 	// if we have existing action already, return error of duplicate action request
-	if ah.hasWorkerGroup(req.ActionName) {
+	if ah.hasMasterGroup(req.ActionName) {
 		req.Err <- nerror.New("duplication action worker request, already exists")
 		return
 	}
 
 	var logger = ah.Logger
-	var workerGroup = ah.createWorkerGroup(req)
+	var workerGroup = ah.createMasterGroup(req)
 	var workerChannel = ah.Pubsub.Channel(req.PubSubTopic, func(data *Message, sub PubSub) {
-		if err := workerGroup.HandleMessage(data); err != nil {
+		if err := workerGroup.Master.HandleMessage(data); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
 				event.String("channel_topic", req.PubSubTopic)
@@ -349,19 +415,104 @@ func (ah *ActionHub) createActionWorker(req ActionWorkerRequest) {
 	close(req.Err)
 }
 
-func (ah *ActionHub) manageWorker(group *ActionWorkerGroup) {
-	ah.waiter.Add(1)
-	group.Start()
-	go func(workerGroup *ActionWorkerGroup) {
-		defer ah.waiter.Done()
-		workerGroup.Wait()
+func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *MasterWorkerGroup) {
+	var slaveName = fmt.Sprintf("%s/slaves/%s", masterGroup.Master.config.ActionName, req.ActionName)
+	var workerConfig = ActionWorkerConfig{
+		ActionName:          slaveName,
+		Addr:                slaveName,
+		MessageBufferSize:   req.MessageBufferSize,
+		Action:              req.Action,
+		MinWorker:           req.MinWorker,
+		MaxWorkers:          req.MaxWorkers,
+		Pubsub:              ah.Pubsub,
+		Behaviour:           RestartAll,
+		Instance:            ScalingInstances,
+		Context:             masterGroup.Master.Ctx(),
+		EscalationHandler:   ah.handleEscalation(masterGroup),
+		MaxIdleness:         req.MaxIdleness,
+		MessageDeliveryWait: req.MessageDeliveryWait,
+	}
 
-		// close channel if not an auto channel.
-		ah.closeWorkerChannel(workerGroup.config.Addr)
-	}(group)
+	workerConfig.ensure()
+
+	var logger = ah.Logger
+	var slaveWorkerGroup = NewWorkGroup(workerConfig)
+	masterGroup.Slaves[slaveName] = slaveWorkerGroup
+
+	var workerChannel = ah.Pubsub.Channel(slaveName, func(data *Message, sub PubSub) {
+		if err := slaveWorkerGroup.HandleMessage(data); err != nil {
+			logger.Log(njson.JSONB(func(event npkg.Encoder) {
+				event.String("error", err.Error())
+				event.String("channel_topic", slaveName)
+				event.String("channel_action", req.ActionName)
+			}))
+		}
+	})
+
+	ah.addWorkerChannel(slaveName, workerChannel)
 }
 
-func (ah *ActionHub) handleEscalation(escalation *Escalation, group *ActionWorkerGroup) {
+func (ah *ActionHub) createMasterGroup(req ActionWorkerRequest) *MasterWorkerGroup {
+	var masterGroup = &MasterWorkerGroup{
+		Master: nil,
+		Slaves: make(map[string]*ActionWorkerGroup, len(req.Slaves)),
+	}
+
+	var workerConfig = ActionWorkerConfig{
+		ActionName:        req.ActionName,
+		Pubsub:            ah.Pubsub,
+		Context:           ah.Context,
+		Addr:              req.PubSubTopic,
+		EscalationHandler: ah.handleEscalation(masterGroup),
+	}
+
+	// create master worker.
+	var workerGroup = req.WorkerCreator(workerConfig)
+	masterGroup.Master = workerGroup
+
+	// generate slave worker groups.
+	for _, slave := range req.Slaves {
+		ah.createSlaveForMaster(slave, masterGroup)
+	}
+
+	// add master group
+	ah.addMasterGroup(req.ActionName, masterGroup)
+
+	go ah.manageWorker(masterGroup)
+
+	return masterGroup
+}
+
+func (ah *ActionHub) manageWorker(masterGroup *MasterWorkerGroup) { //nolint:unused,unused
+	ah.waiter.Add(1)
+	masterGroup.Start()
+	go func(group *MasterWorkerGroup) {
+		defer ah.waiter.Done()
+
+		// wait till master  is stopped
+		group.Master.Wait()
+
+		// send signal to group to stop as well.
+		group.Stop()
+
+		// remove worker group
+		ah.rmMasterGroup(group.Master.config.Addr)
+
+		// close channel if not an auto channel.
+		ah.closeWorkerChannel(group.Master.config.Addr)
+
+		// close all slave channels
+		for _, slave := range group.Slaves {
+			ah.closeWorkerChannel(slave.config.Addr)
+		}
+	}(masterGroup)
+}
+
+func (ah *ActionHub) handleMasterEscalation(
+	escalation *Escalation,
+	group *ActionWorkerGroup,
+	masterGroup *MasterWorkerGroup,
+) {
 	switch escalation.GroupProtocol {
 	case RestartProtocol:
 		// do nothing
@@ -373,24 +524,46 @@ func (ah *ActionHub) handleEscalation(escalation *Escalation, group *ActionWorke
 	}
 }
 
-func (ah *ActionHub) getWorkerGroup(actionName string) *ActionWorkerGroup {
-	var workerGroup *ActionWorkerGroup
-	ah.workerInstancesMutex.RLock()
-	{
-		workerGroup = ah.workerGroupInstances[actionName]
+func (ah *ActionHub) handleEscalation(masterGroup *MasterWorkerGroup) WorkerEscalationHandler {
+	return func(escalation *Escalation, group *ActionWorkerGroup) {
+		ah.handleMasterEscalation(escalation, group, masterGroup)
 	}
-	ah.workerInstancesMutex.RUnlock()
-	return workerGroup
 }
 
-func (ah *ActionHub) hasWorkerGroup(actionName string) bool {
-	var hasWorkerGroup bool
-	ah.workerInstancesMutex.RLock()
+func (ah *ActionHub) hasMasterGroup(groupName string) bool {
+	var hasMaster bool
+	ah.masterGroupsMutex.RLock()
 	{
-		_, hasWorkerGroup = ah.workerGroupInstances[actionName]
+		_, hasMaster = ah.masterGroups[groupName]
 	}
-	ah.workerInstancesMutex.RUnlock()
-	return hasWorkerGroup
+	ah.masterGroupsMutex.RUnlock()
+	return hasMaster
+}
+
+func (ah *ActionHub) getMasterGroup(actionName string) *MasterWorkerGroup {
+	var group *MasterWorkerGroup
+	ah.masterGroupsMutex.RLock()
+	{
+		group = ah.masterGroups[actionName]
+	}
+	ah.masterGroupsMutex.RUnlock()
+	return group
+}
+
+func (ah *ActionHub) rmMasterGroup(actionName string) {
+	ah.masterGroupsMutex.RLock()
+	{
+		delete(ah.masterGroups, actionName)
+	}
+	ah.masterGroupsMutex.RUnlock()
+}
+
+func (ah *ActionHub) addMasterGroup(actionName string, group *MasterWorkerGroup) {
+	ah.masterGroupsMutex.Lock()
+	{
+		ah.masterGroups[actionName] = group
+	}
+	ah.masterGroupsMutex.Unlock()
 }
 
 func (ah *ActionHub) hasWorkerChannel(channelTopic string) bool {
@@ -401,14 +574,6 @@ func (ah *ActionHub) hasWorkerChannel(channelTopic string) bool {
 	}
 	ah.workerChannelMutex.RUnlock()
 	return hasWorkerGroup
-}
-
-func (ah *ActionHub) addWorkerGroup(actionName string, group *ActionWorkerGroup) {
-	ah.workerInstancesMutex.Lock()
-	{
-		ah.workerGroupInstances[actionName] = group
-	}
-	ah.workerInstancesMutex.Unlock()
 }
 
 func (ah *ActionHub) addWorkerChannel(channelTopic string, channel Channel) {
@@ -462,7 +627,8 @@ func (ah *ActionHub) isAutoChannel(channelTopic string) bool {
 
 func (ah *ActionHub) endActionWorkers() {
 	var channels map[string]Channel
-	var workers map[string]*ActionWorkerGroup
+	var masterGroups map[string]*MasterWorkerGroup
+	//var workers map[string]*ActionWorkerGroup
 
 	// swap channel maps
 	ah.workerChannelMutex.Lock()
@@ -472,13 +638,13 @@ func (ah *ActionHub) endActionWorkers() {
 	}
 	ah.workerChannelMutex.Unlock()
 
-	// swap instance maps
-	ah.workerInstancesMutex.Lock()
+	// swap master groups maps
+	ah.masterGroupsMutex.Lock()
 	{
-		workers = ah.workerGroupInstances
-		ah.workerGroupInstances = map[string]*ActionWorkerGroup{}
+		masterGroups = ah.masterGroups
+		ah.masterGroups = map[string]*MasterWorkerGroup{}
 	}
-	ah.workerInstancesMutex.Unlock()
+	ah.masterGroupsMutex.Unlock()
 
 	// Close all worker group channels
 	for _, channel := range channels {
@@ -487,9 +653,9 @@ func (ah *ActionHub) endActionWorkers() {
 
 	// Stop all worker groups
 	var stopGroup sync.WaitGroup
-	for _, worker := range workers {
+	for _, worker := range masterGroups {
 		stopGroup.Add(1)
-		go func(w *ActionWorkerGroup) {
+		go func(w *MasterWorkerGroup) {
 			defer stopGroup.Done()
 			w.Stop()
 		}(worker)
