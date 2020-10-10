@@ -106,7 +106,7 @@ func (wc *ActionWorkerRequest) ensure() {
 		panic("ActionWorkerRequest.ActionName must be provided")
 	}
 	if wc.PubSubTopic == "" {
-		panic("ActionWorkerConfig.PubSubTopic must be provided")
+		panic("ActionWorkerConfig.Mailbox must be provided")
 	}
 	if wc.WorkerCreator == nil {
 		panic("ActionWorkerConfig.WorkerCreator must be provided")

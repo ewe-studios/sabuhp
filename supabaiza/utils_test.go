@@ -20,8 +20,9 @@ func (n NoPubSubChannel) Close() {
 var _ supabaiza.PubSub = (*NoPubSub)(nil)
 
 type NoPubSub struct {
-	SendFunc    func(message *supabaiza.Message, timeout time.Duration) error
-	ChannelFunc func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel
+	DelegateFunc  func(message *supabaiza.Message, timeout time.Duration) error
+	BroadcastFunc func(message *supabaiza.Message, timeout time.Duration) error
+	ChannelFunc   func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel
 }
 
 func (n NoPubSub) Channel(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
@@ -31,9 +32,16 @@ func (n NoPubSub) Channel(topic string, callback supabaiza.ChannelResponse) supa
 	return &NoPubSubChannel{}
 }
 
-func (n NoPubSub) Send(message *supabaiza.Message, timeout time.Duration) error {
-	if n.SendFunc != nil {
-		return n.SendFunc(message, timeout)
+func (n NoPubSub) Delegate(message *supabaiza.Message, timeout time.Duration) error {
+	if n.DelegateFunc != nil {
+		return n.DelegateFunc(message, timeout)
+	}
+	return nil
+}
+
+func (n NoPubSub) Broadcast(message *supabaiza.Message, timeout time.Duration) error {
+	if n.BroadcastFunc != nil {
+		return n.BroadcastFunc(message, timeout)
 	}
 	return nil
 }

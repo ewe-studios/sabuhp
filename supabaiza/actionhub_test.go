@@ -30,7 +30,7 @@ func TestNewActionHub_StartStop(t *testing.T) {
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{
-		SendFunc: func(message *supabaiza.Message, timeout time.Duration) error {
+		BroadcastFunc: func(message *supabaiza.Message, timeout time.Duration) error {
 			sendList = append(sendList, message)
 			return nil
 		},
@@ -76,7 +76,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
-	pubsub.SendFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+	pubsub.BroadcastFunc = func(message *supabaiza.Message, timeout time.Duration) error {
 		sendList = append(sendList, message)
 		for _, channel := range channels {
 			if channel.Topic == message.Topic {
@@ -116,7 +116,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	require.Len(t, channels, 1)
 
 	var ack = make(chan struct{}, 1)
-	require.NoError(t, pubsub.Send(&supabaiza.Message{
+	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
 		Payload:  supabaiza.BinaryPayload("alex"),
@@ -149,7 +149,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
-	pubsub.SendFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+	pubsub.BroadcastFunc = func(message *supabaiza.Message, timeout time.Duration) error {
 		sl.Lock()
 		defer sl.Unlock()
 		sendList = append(sendList, message)
@@ -187,7 +187,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	require.NoError(t, hub.Do("say_hello", sayHelloAction, supabaiza.SlaveWorkerRequest{
 		ActionName: "hello_slave",
 		Action: func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
-			if err := pubsub.Send(&supabaiza.Message{
+			if err := pubsub.Broadcast(&supabaiza.Message{
 				Topic:    "say_hello",
 				FromAddr: to,
 				Payload:  supabaiza.BinaryPayload("slave from hello"),
@@ -205,7 +205,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	chl.Unlock()
 
 	var ack = make(chan struct{}, 1)
-	require.NoError(t, pubsub.Send(&supabaiza.Message{
+	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
 		FromAddr: "yay",
 		Topic:    "say_hello/slaves/hello_slave",
 		Payload:  supabaiza.BinaryPayload("alex"),
@@ -240,7 +240,7 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
-	pubsub.SendFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+	pubsub.BroadcastFunc = func(message *supabaiza.Message, timeout time.Duration) error {
 		sl.Lock()
 		defer sl.Unlock()
 
@@ -283,7 +283,7 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	chl.Unlock()
 
 	var ack = make(chan struct{}, 1)
-	require.NoError(t, pubsub.Send(&supabaiza.Message{
+	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
 		Payload:  supabaiza.BinaryPayload("alex"),
@@ -308,7 +308,7 @@ func sayHelloAction(config supabaiza.ActionWorkerConfig) *supabaiza.ActionWorker
 	config.Instance = supabaiza.ScalingInstances
 	config.Behaviour = supabaiza.RestartAll
 	config.Action = func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
-		if err := pubsub.Send(&supabaiza.Message{
+		if err := pubsub.Broadcast(&supabaiza.Message{
 			Topic:    message.FromAddr,
 			FromAddr: to,
 			Payload:  supabaiza.BinaryPayload("Hello"),

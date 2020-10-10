@@ -2,6 +2,7 @@ package supabaiza_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ func createWorkerConfig(ctx context.Context, action supabaiza.Action, buffer int
 }
 
 func TestNewWorkGroup(t *testing.T) {
+	var count sync.WaitGroup
+	count.Add(10)
 	var config = createWorkerConfig(
 		context.Background(),
 		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
@@ -36,6 +39,7 @@ func TestNewWorkGroup(t *testing.T) {
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
 			require.NotNil(t, testName, to)
+			count.Done()
 		},
 		3,
 		3,
@@ -46,16 +50,15 @@ func TestNewWorkGroup(t *testing.T) {
 
 	var textPayload = supabaiza.TextPayload("Welcome to life")
 	for i := 0; i < 10; i++ {
-		var ack = make(chan struct{}, 1)
 		require.NoError(t, group.HandleMessage(&supabaiza.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Payload:  textPayload,
 			Metadata: nil,
-			Ack:      ack,
 		}))
-		<-ack
 	}
+
+	count.Wait()
 
 	var stats = group.Stats()
 	group.Stop()
@@ -65,6 +68,9 @@ func TestNewWorkGroup(t *testing.T) {
 }
 
 func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
+	var count sync.WaitGroup
+	count.Add(10)
+
 	var config = createWorkerConfig(
 		context.Background(),
 		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
@@ -75,6 +81,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 			// create 1 second delay.
 			<-time.After(500 * time.Millisecond)
+			count.Done()
 		},
 		1,
 		3,
@@ -89,23 +96,17 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 	require.Equal(t, 2, stats.AvailableWorkerCapacity)
 	require.Equal(t, 1, stats.TotalCurrentWorkers)
 
-	var acks []chan struct{}
 	var textPayload = supabaiza.TextPayload("Welcome to life")
 	for i := 0; i < 10; i++ {
-		var ack = make(chan struct{}, 1)
-		acks = append(acks, ack)
 		require.NoError(t, group.HandleMessage(&supabaiza.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Payload:  textPayload,
 			Metadata: nil,
-			Ack:      ack,
 		}))
 	}
 
-	for _, ack := range acks {
-		<-ack
-	}
+	count.Wait()
 
 	var stats2 = group.Stats()
 	require.Equal(t, 0, stats2.AvailableWorkerCapacity)
@@ -162,11 +163,6 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	group.WaitRestart()
 
 	group.Stop()
-
-	require.NotNil(t, msg.Nack)
-	require.NotEmpty(t, msg.Nack)
-
-	<-msg.Nack
 
 	var stats3 = group.Stats()
 	require.Equal(t, 4, stats3.TotalKilledWorkers)

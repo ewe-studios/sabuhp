@@ -48,25 +48,6 @@ type Message struct {
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
-
-	// SystemAlerts indicates to the executing service to
-	// resend a system message for a possible failure of
-	// a giving message.
-	SystemAlerts bool
-
-	// Ack allows you to request acknowledgement that message
-	// was processed, if provided. Our advice is to always
-	// ensure your ack is a buffered channel of 1 capacity.
-	//
-	// If this is not the case then you will get a panic
-	Ack chan struct{}
-
-	// Nack allows you to request acknowledgement that message
-	// was not processed, if provided. Our advice is to always
-	// ensure your ack is a buffered channel of 1 capacity.
-	//
-	// If this is not the case then you will get a panic
-	Nack chan struct{}
 }
 
 // Copy returns a copy of this messages with underline data
@@ -80,4 +61,11 @@ func (m *Message) Copy() *Message {
 	clone.Metadata = meta
 	clone.Payload = m.Payload.Copy()
 	return &clone
+}
+
+// Codec embodies implementation for the serialization of
+// a message into bytes and vice-versa.
+type Codec interface {
+	Encode(msg *Message) ([]byte, error)
+	Decode([]byte) (*Message, error)
 }

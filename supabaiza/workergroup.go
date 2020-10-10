@@ -267,13 +267,6 @@ func (w *ActionWorkerGroup) WaitRestart() {
 }
 
 func (w *ActionWorkerGroup) HandleMessage(message *Message) error {
-	if message.Ack != nil && cap(message.Ack) == 0 {
-		panic("Message.Ack channels must have capacity of 1 atleast")
-	}
-	if message.Nack != nil && cap(message.Nack) == 0 {
-		panic("Message.Nack channels must have capacity of 1 atleast")
-	}
-
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -322,11 +315,6 @@ func (w *ActionWorkerGroup) doWork() {
 		var err = recover()
 		if err != nil {
 			atomic.AddInt64(&w.totalPanics, 1)
-		}
-
-		// Users must be careful here.
-		if currentMessage != nil && currentMessage.Nack != nil {
-			currentMessage.Nack <- struct{}{}
 		}
 
 		if w.isRestarting() {
@@ -387,11 +375,6 @@ func (w *ActionWorkerGroup) doWork() {
 			atomic.AddInt64(&w.totalMessages, 1)
 			action(w.context, w.config.Addr, currentMessage, pubsub)
 			atomic.AddInt64(&w.totalProcessed, 1)
-
-			// Users must be careful here.
-			if currentMessage.Ack != nil {
-				currentMessage.Ack <- struct{}{}
-			}
 
 			if w.config.Instance == OneTimeInstance {
 				return
