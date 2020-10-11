@@ -75,6 +75,12 @@ type Escalation struct {
 
 type WorkerEscalationHandler func(escalation *Escalation, wk *ActionWorkerGroup)
 
+// ActionWorkerConfig contains necessary properties required by a Worker
+//
+// An important notice to be given is to ensure any blocking operation in the
+// ActionWorkerConfig.EscalationHandler is shot into a goroutine, else this will
+// block the WorkerGroup's internal run loop. The responsibility is shifted to the
+// user to provide a more concise, expected behaviour, hence the user should be aware.
 type ActionWorkerConfig struct {
 	ActionName          string
 	Addr                string
@@ -415,15 +421,15 @@ manageLoop:
 				w.enterRestart()
 
 				esc.GroupProtocol = RestartProtocol
-				go w.config.EscalationHandler(&esc, w)
+				w.config.EscalationHandler(&esc, w)
 				break manageLoop
 			case StopAllAndEscalate:
 				esc.PendingMessages = w.jobs
 				esc.GroupProtocol = KillAndEscalateProtocol
 
 				w.cancelDo.Do(func() {
-					w.ctxCancelFn()
-					go w.config.EscalationHandler(&esc, w)
+					defer w.ctxCancelFn()
+					w.config.EscalationHandler(&esc, w)
 				})
 				break manageLoop
 			case DoNothing:
@@ -457,10 +463,10 @@ func (w *ActionWorkerGroup) isRestarting() bool {
 }
 
 func (w *ActionWorkerGroup) enterRestart() {
+	w.restartSignal.Add(1)
 	w.rm.Lock()
 	w.restarting = true
 	w.rm.Unlock()
-	w.restartSignal.Add(1)
 }
 
 func (w *ActionWorkerGroup) endRestart() {

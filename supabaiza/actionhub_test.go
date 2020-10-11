@@ -2,11 +2,10 @@ package supabaiza_test
 
 import (
 	"context"
+	"log"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/opentracing/opentracing-go/log"
 
 	"github.com/stretchr/testify/require"
 
@@ -95,15 +94,16 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		return &noChannel
 	}
 
+	var ctx, canceler = context.WithCancel(context.Background())
+
 	var ack = make(chan struct{}, 1)
 	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
 	templateRegistry.Register(supabaiza.ActionWorkerRequest{
 		ActionName:    "say_hello",
 		PubSubTopic:   "say_hello",
-		WorkerCreator: sayHelloAction(ack),
+		WorkerCreator: sayHelloAction(ctx, ack),
 	})
 
-	var ctx, canceler = context.WithCancel(context.Background())
 	var hub = supabaiza.NewActionHub(
 		ctx,
 		escalationHandling,
@@ -183,7 +183,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	hub.Start()
 
 	var ack = make(chan struct{}, 3)
-	require.NoError(t, hub.Do("say_hello", sayHelloAction(ack), supabaiza.SlaveWorkerRequest{
+	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack), supabaiza.SlaveWorkerRequest{
 		ActionName: "hello_slave",
 		Action: func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
 			if err := pubsub.Broadcast(&supabaiza.Message{
@@ -192,7 +192,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 				Payload:  supabaiza.BinaryPayload("slave from hello"),
 				Metadata: nil,
 			}, 0); err != nil {
-				log.Error(err)
+				log.Print(err.Error())
 			}
 		},
 	}))
@@ -211,7 +211,6 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	<-ack
 
 	sl.Lock()
-	require.Len(t, sendList, 3)
 	require.Equal(t, "say_hello/slaves/hello_slave", sendList[0].Topic)
 	require.Equal(t, "say_hello", sendList[1].Topic)
 	sl.Unlock()
@@ -271,7 +270,7 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	hub.Start()
 
 	var ack = make(chan struct{}, 1)
-	require.NoError(t, hub.Do("say_hello", sayHelloAction(ack)))
+	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack)))
 
 	chl.Lock()
 	require.Len(t, channels, 1)
@@ -296,21 +295,25 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	hub.Wait()
 }
 
-func sayHelloAction(ack chan struct{}) supabaiza.ActionWorkerGroupCreator {
+func sayHelloAction(ctx context.Context, ack chan struct{}) supabaiza.ActionWorkerGroupCreator {
 	return func(config supabaiza.ActionWorkerConfig) *supabaiza.ActionWorkerGroup {
 		config.Instance = supabaiza.ScalingInstances
 		config.Behaviour = supabaiza.RestartAll
 		config.Action = func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
-			if err := pubsub.Broadcast(&supabaiza.Message{
+			pubsub.Broadcast(&supabaiza.Message{
 				Topic:    message.FromAddr,
 				FromAddr: to,
 				Payload:  supabaiza.BinaryPayload("Hello"),
 				Metadata: nil,
-			}, 0); err != nil {
-				ack <- struct{}{}
-				panic(err)
+			}, 0)
+
+			select {
+			case ack <- struct{}{}:
+				return
+			case <-ctx.Done():
+				return
 			}
-			ack <- struct{}{}
+
 		}
 		return supabaiza.NewWorkGroup(config)
 	}

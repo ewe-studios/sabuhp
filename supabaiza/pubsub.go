@@ -75,9 +75,10 @@ type PubSub interface {
 // mailboxChannel houses a channel for a mailbox responder.
 type mailboxChannel struct {
 	mailbox  *Mailbox
-	left     *mailboxChannel
-	right    *mailboxChannel
 	callback ChannelResponse
+
+	left  *mailboxChannel
+	right *mailboxChannel
 }
 
 func (mc *mailboxChannel) deliver(msg *Message) {
@@ -98,16 +99,6 @@ func (mc *mailboxChannel) add(channel *mailboxChannel) {
 	mc.right = channel
 	channel.left = mc
 	mc.mailbox.tailChannel = channel
-}
-
-func (mc *mailboxChannel) burn() {
-	mc.mailbox = nil
-	if mc.right != nil {
-		mc.right.burn()
-	}
-	if mc.left != nil {
-		mc.left.burn()
-	}
 }
 
 func (mc *mailboxChannel) disconnect() {
@@ -282,13 +273,8 @@ func (ps *Mailbox) Stop() {
 }
 
 func (ps *Mailbox) disconnectChannels() {
-	var root = ps.rootChannel
 	ps.rootChannel = nil
 	ps.tailChannel = nil
-
-	if root != nil {
-		root.burn()
-	}
 }
 
 func (ps *Mailbox) manage() {
