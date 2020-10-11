@@ -154,7 +154,6 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 		FromAddr: "component_1",
 		Payload:  textPayload,
 		Metadata: nil,
-		Nack:     make(chan struct{}, 1),
 	}
 	require.NoError(t, group.HandleMessage(msg))
 

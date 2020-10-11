@@ -95,11 +95,12 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		return &noChannel
 	}
 
+	var ack = make(chan struct{}, 1)
 	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
 	templateRegistry.Register(supabaiza.ActionWorkerRequest{
 		ActionName:    "say_hello",
 		PubSubTopic:   "say_hello",
-		WorkerCreator: sayHelloAction,
+		WorkerCreator: sayHelloAction(ack),
 	})
 
 	var ctx, canceler = context.WithCancel(context.Background())
@@ -115,14 +116,11 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 
 	require.Len(t, channels, 1)
 
-	var ack = make(chan struct{}, 1)
 	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
 		Payload:  supabaiza.BinaryPayload("alex"),
 		Metadata: nil,
-		Ack:      ack,
-		Nack:     nil,
 	}, 0))
 
 	<-ack
@@ -184,7 +182,8 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 
 	hub.Start()
 
-	require.NoError(t, hub.Do("say_hello", sayHelloAction, supabaiza.SlaveWorkerRequest{
+	var ack = make(chan struct{}, 3)
+	require.NoError(t, hub.Do("say_hello", sayHelloAction(ack), supabaiza.SlaveWorkerRequest{
 		ActionName: "hello_slave",
 		Action: func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
 			if err := pubsub.Broadcast(&supabaiza.Message{
@@ -192,8 +191,6 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 				FromAddr: to,
 				Payload:  supabaiza.BinaryPayload("slave from hello"),
 				Metadata: nil,
-				Ack:      nil,
-				Nack:     nil,
 			}, 0); err != nil {
 				log.Error(err)
 			}
@@ -204,20 +201,17 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	require.Len(t, channels, 2)
 	chl.Unlock()
 
-	var ack = make(chan struct{}, 1)
 	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
 		FromAddr: "yay",
 		Topic:    "say_hello/slaves/hello_slave",
 		Payload:  supabaiza.BinaryPayload("alex"),
 		Metadata: nil,
-		Ack:      ack,
-		Nack:     nil,
 	}, 0))
 
 	<-ack
 
 	sl.Lock()
-	require.Len(t, sendList, 2)
+	require.Len(t, sendList, 3)
 	require.Equal(t, "say_hello/slaves/hello_slave", sendList[0].Topic)
 	require.Equal(t, "say_hello", sendList[1].Topic)
 	sl.Unlock()
@@ -276,20 +270,18 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 
 	hub.Start()
 
-	require.NoError(t, hub.Do("say_hello", sayHelloAction))
+	var ack = make(chan struct{}, 1)
+	require.NoError(t, hub.Do("say_hello", sayHelloAction(ack)))
 
 	chl.Lock()
 	require.Len(t, channels, 1)
 	chl.Unlock()
 
-	var ack = make(chan struct{}, 1)
 	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
 		Payload:  supabaiza.BinaryPayload("alex"),
 		Metadata: nil,
-		Ack:      ack,
-		Nack:     nil,
 	}, 0))
 
 	<-ack
@@ -304,20 +296,22 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	hub.Wait()
 }
 
-func sayHelloAction(config supabaiza.ActionWorkerConfig) *supabaiza.ActionWorkerGroup {
-	config.Instance = supabaiza.ScalingInstances
-	config.Behaviour = supabaiza.RestartAll
-	config.Action = func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
-		if err := pubsub.Broadcast(&supabaiza.Message{
-			Topic:    message.FromAddr,
-			FromAddr: to,
-			Payload:  supabaiza.BinaryPayload("Hello"),
-			Metadata: nil,
-			Ack:      nil,
-			Nack:     nil,
-		}, 0); err != nil {
-			panic(err)
+func sayHelloAction(ack chan struct{}) supabaiza.ActionWorkerGroupCreator {
+	return func(config supabaiza.ActionWorkerConfig) *supabaiza.ActionWorkerGroup {
+		config.Instance = supabaiza.ScalingInstances
+		config.Behaviour = supabaiza.RestartAll
+		config.Action = func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+			if err := pubsub.Broadcast(&supabaiza.Message{
+				Topic:    message.FromAddr,
+				FromAddr: to,
+				Payload:  supabaiza.BinaryPayload("Hello"),
+				Metadata: nil,
+			}, 0); err != nil {
+				ack <- struct{}{}
+				panic(err)
+			}
+			ack <- struct{}{}
 		}
+		return supabaiza.NewWorkGroup(config)
 	}
-	return supabaiza.NewWorkGroup(config)
 }

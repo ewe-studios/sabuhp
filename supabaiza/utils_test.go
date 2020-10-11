@@ -51,3 +51,26 @@ type LoggerPub struct{}
 func (l LoggerPub) Log(cb *njson.JSON) {
 	log.Println(cb.Message())
 }
+
+type TransportImpl struct {
+	ConnFunc      func() supabaiza.Conn
+	SendToOneFunc func(data *supabaiza.Message, timeout time.Duration) error
+	SendToAllFunc func(data *supabaiza.Message, timeout time.Duration) error
+	ListenFunc    func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel
+}
+
+func (t TransportImpl) Conn() supabaiza.Conn {
+	return t.ConnFunc()
+}
+
+func (t TransportImpl) Listen(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+	return t.ListenFunc(topic, handler)
+}
+
+func (t TransportImpl) SendToOne(data *supabaiza.Message, timeout time.Duration) error {
+	return t.SendToOneFunc(data, timeout)
+}
+
+func (t TransportImpl) SendToAll(data *supabaiza.Message, timeout time.Duration) error {
+	return t.SendToAllFunc(data, timeout)
+}

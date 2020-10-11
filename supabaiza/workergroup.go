@@ -280,7 +280,7 @@ func (w *ActionWorkerGroup) HandleMessage(message *Message) error {
 	}
 
 	// check capacity and increase if still available.
-	// add a new worker to handle this job then.
+	// Add a new worker to handle this job then.
 	var maxSlots = atomic.LoadInt64(&w.availableSlots)
 	if maxSlots > 0 {
 		w.addWorker <- struct{}{}

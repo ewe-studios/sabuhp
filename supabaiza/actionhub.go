@@ -372,9 +372,6 @@ func (ah *ActionHub) createAutoActionWorker(req ActionWorkerRequest) {
 		// if it's still nil then (should be impossible)
 		// but report message failure if allowed
 		if workerGroup == nil {
-			if data.Nack != nil {
-				data.Nack <- struct{}{}
-			}
 			return
 		}
 
@@ -475,7 +472,7 @@ func (ah *ActionHub) createMasterGroup(req ActionWorkerRequest) *MasterWorkerGro
 		ah.createSlaveForMaster(slave, masterGroup)
 	}
 
-	// add master group
+	// Add master group
 	ah.addMasterGroup(req.ActionName, masterGroup)
 
 	go ah.manageWorker(masterGroup)
@@ -492,7 +489,7 @@ func (ah *ActionHub) manageWorker(masterGroup *MasterWorkerGroup) { //nolint:unu
 		// wait till master  is stopped
 		group.Master.Wait()
 
-		// send signal to group to stop as well.
+		// send signal to group to Stop as well.
 		group.Stop()
 
 		// remove worker group

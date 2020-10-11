@@ -1,5 +1,10 @@
 package supabaiza
 
+import (
+	"fmt"
+	"strings"
+)
+
 type PayloadType int
 
 const (
@@ -48,6 +53,28 @@ type Message struct {
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
+}
+
+func (m *Message) String() string {
+	var content strings.Builder
+	content.WriteString("topic: ")
+	content.WriteString(m.Topic)
+	content.WriteString("\n")
+	content.WriteString("from: ")
+	content.WriteString(m.FromAddr)
+	content.WriteString("\n")
+	content.WriteString("payload: ")
+	content.WriteString(fmt.Sprintf("%#q", m.Payload))
+	content.WriteString("\n")
+	content.WriteString("Meta: ")
+	for key, val := range m.Metadata {
+		content.WriteString(key)
+		content.WriteString(": ")
+		content.WriteString(val)
+		content.WriteString(",")
+	}
+	content.WriteString("\n")
+	return content.String()
 }
 
 // Copy returns a copy of this messages with underline data
