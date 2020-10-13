@@ -32,10 +32,12 @@ type Conn interface {
 	Type() int
 }
 
+type TransportResponse func(*Message)
+
 // Transport defines what an underline transport system provides.
 type Transport interface {
 	Conn() Conn
-	Listen(topic string, handler func(*Message)) Channel
+	Listen(topic string, handler TransportResponse) Channel
 	SendToOne(data *Message, timeout time.Duration) error
 	SendToAll(data *Message, timeout time.Duration) error
 }
@@ -189,6 +191,10 @@ func (ps *Mailbox) DeliverTimeout(message *Message, timeout time.Duration) error
 	case <-ps.ctx.Done():
 		return nerror.New("failed to Deliver, mailbox closed")
 	}
+}
+
+func (ps *Mailbox) MessageChannel() chan *Message {
+	return ps.messages
 }
 
 func (ps *Mailbox) Deliver(message *Message) error {
@@ -380,7 +386,7 @@ func (p *PubSubImpl) getTopic(topic string) *Mailbox {
 	var mailbox *Mailbox
 	p.tml.RLock()
 	mailbox = p.topicMappings[topic]
-	p.tml.Unlock()
+	p.tml.RUnlock()
 	return mailbox
 }
 

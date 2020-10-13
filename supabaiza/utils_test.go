@@ -56,14 +56,14 @@ type TransportImpl struct {
 	ConnFunc      func() supabaiza.Conn
 	SendToOneFunc func(data *supabaiza.Message, timeout time.Duration) error
 	SendToAllFunc func(data *supabaiza.Message, timeout time.Duration) error
-	ListenFunc    func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel
+	ListenFunc    func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel
 }
 
 func (t TransportImpl) Conn() supabaiza.Conn {
 	return t.ConnFunc()
 }
 
-func (t TransportImpl) Listen(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+func (t TransportImpl) Listen(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 	return t.ListenFunc(topic, handler)
 }
 

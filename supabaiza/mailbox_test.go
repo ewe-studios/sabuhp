@@ -17,7 +17,7 @@ func TestMailbox_StartAndStop(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
@@ -51,7 +51,7 @@ func TestMailbox_StartAndStopWithCancel(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
@@ -89,7 +89,7 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
@@ -141,7 +141,7 @@ func TestMailbox_2Subscribers(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
@@ -201,7 +201,7 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
@@ -280,7 +280,7 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
@@ -359,7 +359,7 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 		ConnFunc: func() supabaiza.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler func(*supabaiza.Message)) supabaiza.Channel {
+		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
 			return nil
 		},
 		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {

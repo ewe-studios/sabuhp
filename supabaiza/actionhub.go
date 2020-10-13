@@ -87,14 +87,16 @@ type ActionWorkerRequest struct {
 	// workgroups.
 	//
 	// There are cases where we want a worker specific for a work group
-	// which can be used to hand off specific tasks to, this then allows
-	// specific and limited use around non-generalistic cases.
+	// which can be used to hand off specific tasks to handle very
+	// special cases, this then allows specific and limited use
+	// around non-generalistic work group slaves.
 	//
 	// Example of such is a dangerous operation that is not intrinsic to
 	// the behaviour of the action but must be done, this can be offloaded
-	// to the slaves who will always be running and are never ever going
-	// die (cause they will be restarted and respawned). They will exists
-	// as far as the master exists.
+	// a dangerous task or non-secure operation to the slaves who will
+	// always be running and are never ever going die because they will be
+	// restarted and respawned.
+	// They will exists as far as the master exists.
 	Slaves []SlaveWorkerRequest
 }
 
