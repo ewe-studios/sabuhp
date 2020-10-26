@@ -91,7 +91,6 @@ type PubSub struct {
 	ender         sync.Once
 	doAction      chan func()
 	subscriptions map[string]redisSub
-	//streams       map[string]string
 }
 
 type redisSub struct {

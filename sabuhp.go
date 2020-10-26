@@ -133,7 +133,7 @@ func NewResponse() *Response {
 	return &Response{
 		Headers: make(map[string][]string),
 		Body:    new(bytes.Buffer),
-		Code:    200,
+		Code:    0,
 	}
 }
 

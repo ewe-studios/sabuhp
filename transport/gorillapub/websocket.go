@@ -1,4 +1,4 @@
-package websocket
+package gorillapub
 
 import (
 	"context"
@@ -404,6 +404,17 @@ type SocketStat struct {
 	Sent       int64
 	Received   int64
 	Handled    int64
+}
+
+func (g SocketStat) EncodeObject(encoder npkg.ObjectEncoder) {
+	encoder.String("id", g.Id)
+	encoder.Int64("total_sent", g.Sent)
+	encoder.Int64("total_handled", g.Handled)
+	encoder.Int64("total_received", g.Received)
+	encoder.String("addr", g.Addr.String())
+	encoder.String("addr_network", g.Addr.Network())
+	encoder.String("remote_addr", g.RemoteAddr.String())
+	encoder.String("remote_addr_network", g.RemoteAddr.Network())
 }
 
 func (g *GorillaSocket) Stat() SocketStat {
