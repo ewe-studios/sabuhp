@@ -49,10 +49,19 @@ type Message struct {
 	FromAddr string
 
 	// Payload is the payload for giving message.
-	Payload Payload
+	Payload interface{}
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
+}
+
+func NewMessage(topic string, fromAddr string, payload Payload, meta map[string]string) *Message {
+	return &Message{
+		Topic:    topic,
+		FromAddr: fromAddr,
+		Payload:  payload,
+		Metadata: meta,
+	}
 }
 
 func (m *Message) String() string {
@@ -86,7 +95,13 @@ func (m *Message) Copy() *Message {
 	}
 	var clone = *m
 	clone.Metadata = meta
-	clone.Payload = m.Payload.Copy()
+
+	if payloadType, isPayload := m.Payload.(Payload); isPayload {
+		clone.Payload = payloadType.Copy()
+	} else {
+		clone.Payload = m.Payload
+	}
+
 	return &clone
 }
 
@@ -94,5 +109,5 @@ func (m *Message) Copy() *Message {
 // a message into bytes and vice-versa.
 type Codec interface {
 	Encode(msg *Message) ([]byte, error)
-	Decode([]byte) (*Message, error)
+	Decode(b []byte) (*Message, error)
 }

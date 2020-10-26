@@ -1,4 +1,4 @@
-package supabaiza_test
+package supabaiza
 
 import (
 	"context"
@@ -7,14 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/influx6/sabuhp/supabaiza"
 )
 
 var testName = "test_action"
 
-func createWorkerConfig(ctx context.Context, action supabaiza.Action, buffer int, max int) supabaiza.ActionWorkerConfig { //nolint:lll
-	return supabaiza.ActionWorkerConfig{
+func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) ActionWorkerConfig { //nolint:lll
+	return ActionWorkerConfig{
 		Context:             ctx,
 		MessageBufferSize:   buffer,
 		Pubsub:              &NoPubSub{},
@@ -23,7 +21,7 @@ func createWorkerConfig(ctx context.Context, action supabaiza.Action, buffer int
 		Action:              action,
 		MaxWorkers:          max,
 		MessageDeliveryWait: time.Millisecond * 100,
-		EscalationHandler: func(escalation *supabaiza.Escalation, wk *supabaiza.ActionWorkerGroup) {
+		EscalationHandler: func(escalation *Escalation, wk *ActionWorkerGroup) {
 
 		},
 	}
@@ -34,7 +32,7 @@ func TestNewWorkGroup(t *testing.T) {
 	count.Add(10)
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -45,12 +43,12 @@ func TestNewWorkGroup(t *testing.T) {
 		3,
 	)
 
-	var group = supabaiza.NewWorkGroup(config)
+	var group = NewWorkGroup(config)
 	group.Start()
 
-	var textPayload = supabaiza.TextPayload("Welcome to life")
+	var textPayload = TextPayload("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(&supabaiza.Message{
+		require.NoError(t, group.HandleMessage(&Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Payload:  textPayload,
@@ -73,7 +71,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -87,7 +85,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 		3,
 	)
 
-	var group = supabaiza.NewWorkGroup(config)
+	var group = NewWorkGroup(config)
 	group.Start()
 
 	<-time.After(time.Second / 3)
@@ -96,9 +94,9 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 	require.Equal(t, 2, stats.AvailableWorkerCapacity)
 	require.Equal(t, 1, stats.TotalCurrentWorkers)
 
-	var textPayload = supabaiza.TextPayload("Welcome to life")
+	var textPayload = TextPayload("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(&supabaiza.Message{
+		require.NoError(t, group.HandleMessage(&Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Payload:  textPayload,
@@ -122,7 +120,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
 			panic("Killed to restart")
 		},
 		1,
@@ -132,24 +130,24 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var notify = make(chan struct{}, 1)
 
 	config.MinWorker = 2
-	config.Behaviour = supabaiza.RestartAll
-	config.EscalationHandler = func(escalation *supabaiza.Escalation, wk *supabaiza.ActionWorkerGroup) {
+	config.Behaviour = RestartAll
+	config.EscalationHandler = func(escalation *Escalation, wk *ActionWorkerGroup) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, escalation.Data)
 		require.NotNil(t, escalation.OffendingMessage)
-		require.Equal(t, supabaiza.PanicProtocol, escalation.WorkerProtocol)
-		require.Equal(t, supabaiza.RestartProtocol, escalation.GroupProtocol)
+		require.Equal(t, PanicProtocol, escalation.WorkerProtocol)
+		require.Equal(t, RestartProtocol, escalation.GroupProtocol)
 
 		notify <- struct{}{}
 	}
 
-	var group = supabaiza.NewWorkGroup(config)
+	var group = NewWorkGroup(config)
 	group.Start()
 
 	<-time.After(time.Second / 2)
 
-	var textPayload = supabaiza.TextPayload("Welcome to life")
-	var msg = &supabaiza.Message{
+	var textPayload = TextPayload("Welcome to life")
+	var msg = &Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Payload:  textPayload,
@@ -173,7 +171,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
+		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
 			panic("Killed to restart")
 		},
 		1,
@@ -183,23 +181,23 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	var notify = make(chan struct{}, 1)
 
 	config.MinWorker = 2
-	config.Behaviour = supabaiza.StopAllAndEscalate
-	config.EscalationHandler = func(escalation *supabaiza.Escalation, wk *supabaiza.ActionWorkerGroup) {
+	config.Behaviour = StopAllAndEscalate
+	config.EscalationHandler = func(escalation *Escalation, wk *ActionWorkerGroup) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, escalation.Data)
 		require.NotNil(t, escalation.OffendingMessage)
-		require.Equal(t, supabaiza.PanicProtocol, escalation.WorkerProtocol)
-		require.Equal(t, supabaiza.KillAndEscalateProtocol, escalation.GroupProtocol)
+		require.Equal(t, PanicProtocol, escalation.WorkerProtocol)
+		require.Equal(t, KillAndEscalateProtocol, escalation.GroupProtocol)
 
 		notify <- struct{}{}
 	}
 
-	var group = supabaiza.NewWorkGroup(config)
+	var group = NewWorkGroup(config)
 	group.Start()
 
 	<-time.After(time.Second / 2)
-	var textPayload = supabaiza.TextPayload("Welcome to life")
-	require.NoError(t, group.HandleMessage(&supabaiza.Message{
+	var textPayload = TextPayload("Welcome to life")
+	require.NoError(t, group.HandleMessage(&Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Payload:  textPayload,

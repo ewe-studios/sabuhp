@@ -1,4 +1,4 @@
-package supabaiza_test
+package supabaiza
 
 import (
 	"context"
@@ -6,31 +6,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/influx6/sabuhp/testingutils"
 
-	"github.com/influx6/sabuhp/supabaiza"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPubSub(t *testing.T) {
-	var logger = &LoggerPub{}
+	var logger = &testingutils.LoggerPub{}
 
-	var listeners = map[string][]supabaiza.TransportResponse{}
+	var listeners = map[string][]TransportResponse{}
 
-	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+	var transport = &testingutils.TransportImpl{
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			listeners[topic] = append(listeners[topic], handler)
-			return &NoPubSubChannel{}
+			return &testingutils.NoPubSubChannel{}
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			for _, handler := range listeners[data.Topic] {
 				handler(data)
 			}
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			var targetListeners = listeners[data.Topic]
 			if len(targetListeners) > 0 {
 				targetListeners[0](data)
@@ -39,15 +39,15 @@ func TestPubSub(t *testing.T) {
 		},
 	}
 
-	var message = &supabaiza.Message{
+	var message = &Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var pubsub = supabaiza.NewPubSubImpl(
+	var pubsub = NewPubSubImpl(
 		ctx,
 		10,
 		logger,
@@ -57,7 +57,7 @@ func TestPubSub(t *testing.T) {
 	var sendWaiter sync.WaitGroup
 	sendWaiter.Add(2)
 
-	var channel = pubsub.Channel("hello", func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel = pubsub.Channel("hello", func(data *Message, sub PubSub) {
 		defer sendWaiter.Done()
 		require.NotNil(t, data)
 		require.NotNil(t, sub)

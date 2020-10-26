@@ -20,6 +20,7 @@ func HTTPRequestToRequest(req *http.Request) *Request {
 		Method:        req.Method,
 		Headers:       headers,
 		Body:          req.Body,
+		Req:           req,
 		Cookies:       ReadCookies(headers, ""),
 	}
 }

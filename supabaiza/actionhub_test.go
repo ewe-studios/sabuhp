@@ -1,4 +1,4 @@
-package supabaiza_test
+package supabaiza
 
 import (
 	"context"
@@ -8,32 +8,30 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/influx6/sabuhp/supabaiza"
 )
 
 type Sub struct {
 	Topic    string
-	Callback supabaiza.ChannelResponse
-	Channel  supabaiza.Channel
+	Callback ChannelResponse
+	Channel  Channel
 }
 
 func TestNewActionHub_StartStop(t *testing.T) {
-	var escalationHandling = func(escalation supabaiza.Escalation, hub *supabaiza.ActionHub) {
+	var escalationHandling = func(escalation Escalation, hub *ActionHub) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, hub)
 	}
 
-	var sendList []*supabaiza.Message
+	var sendList []*Message
 	var channel []Sub
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{
-		BroadcastFunc: func(message *supabaiza.Message, timeout time.Duration) error {
+		BroadcastFunc: func(message *Message, timeout time.Duration) error {
 			sendList = append(sendList, message)
 			return nil
 		},
-		ChannelFunc: func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
+		ChannelFunc: func(topic string, callback ChannelResponse) Channel {
 			var noChannel NoPubSubChannel
 			channel = append(channel, Sub{
 				Topic:    topic,
@@ -44,9 +42,9 @@ func TestNewActionHub_StartStop(t *testing.T) {
 		},
 	}
 
-	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
+	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
-	var hub = supabaiza.NewActionHub(
+	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
@@ -65,17 +63,17 @@ func TestNewActionHub_StartStop(t *testing.T) {
 }
 
 func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
-	var escalationHandling = func(escalation supabaiza.Escalation, hub *supabaiza.ActionHub) {
+	var escalationHandling = func(escalation Escalation, hub *ActionHub) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, hub)
 	}
 
-	var sendList []*supabaiza.Message
+	var sendList []*Message
 	var channels []Sub
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
-	pubsub.BroadcastFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+	pubsub.BroadcastFunc = func(message *Message, timeout time.Duration) error {
 		sendList = append(sendList, message)
 		for _, channel := range channels {
 			if channel.Topic == message.Topic {
@@ -84,7 +82,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		}
 		return nil
 	}
-	pubsub.ChannelFunc = func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
+	pubsub.ChannelFunc = func(topic string, callback ChannelResponse) Channel {
 		var noChannel NoPubSubChannel
 		channels = append(channels, Sub{
 			Topic:    topic,
@@ -97,14 +95,14 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	var ctx, canceler = context.WithCancel(context.Background())
 
 	var ack = make(chan struct{}, 1)
-	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
-	templateRegistry.Register(supabaiza.ActionWorkerRequest{
+	var templateRegistry = NewWorkerTemplateRegistry()
+	templateRegistry.Register(ActionWorkerRequest{
 		ActionName:    "say_hello",
 		PubSubTopic:   "say_hello",
 		WorkerCreator: sayHelloAction(ctx, ack),
 	})
 
-	var hub = supabaiza.NewActionHub(
+	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
@@ -116,10 +114,10 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 
 	require.Len(t, channels, 1)
 
-	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
+	require.NoError(t, pubsub.Broadcast(&Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}, 0))
 
@@ -134,20 +132,20 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 }
 
 func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
-	var escalationHandling = func(escalation supabaiza.Escalation, hub *supabaiza.ActionHub) {
+	var escalationHandling = func(escalation Escalation, hub *ActionHub) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, hub)
 	}
 
 	var sl sync.Mutex
-	var sendList []*supabaiza.Message
+	var sendList []*Message
 
 	var chl sync.Mutex
 	var channels []Sub
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
-	pubsub.BroadcastFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+	pubsub.BroadcastFunc = func(message *Message, timeout time.Duration) error {
 		sl.Lock()
 		defer sl.Unlock()
 		sendList = append(sendList, message)
@@ -158,7 +156,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 		}
 		return nil
 	}
-	pubsub.ChannelFunc = func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
+	pubsub.ChannelFunc = func(topic string, callback ChannelResponse) Channel {
 		chl.Lock()
 		defer chl.Unlock()
 		var noChannel NoPubSubChannel
@@ -170,9 +168,9 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 		return &noChannel
 	}
 
-	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
+	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
-	var hub = supabaiza.NewActionHub(
+	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
@@ -183,13 +181,13 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	hub.Start()
 
 	var ack = make(chan struct{}, 3)
-	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack), supabaiza.SlaveWorkerRequest{
+	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack), SlaveWorkerRequest{
 		ActionName: "hello_slave",
-		Action: func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
-			if err := pubsub.Broadcast(&supabaiza.Message{
+		Action: func(ctx context.Context, to string, message *Message, pubsub PubSub) {
+			if err := pubsub.Broadcast(&Message{
 				Topic:    "say_hello",
 				FromAddr: to,
-				Payload:  supabaiza.BinaryPayload("slave from hello"),
+				Payload:  BinaryPayload("slave from hello"),
 				Metadata: nil,
 			}, 0); err != nil {
 				log.Print(err.Error())
@@ -201,10 +199,10 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	require.Len(t, channels, 2)
 	chl.Unlock()
 
-	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
+	require.NoError(t, pubsub.Broadcast(&Message{
 		FromAddr: "yay",
 		Topic:    "say_hello/slaves/hello_slave",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}, 0))
 
@@ -220,20 +218,20 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 }
 
 func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
-	var escalationHandling = func(escalation supabaiza.Escalation, hub *supabaiza.ActionHub) {
+	var escalationHandling = func(escalation Escalation, hub *ActionHub) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, hub)
 	}
 
 	var sl sync.Mutex
-	var sendList []*supabaiza.Message
+	var sendList []*Message
 
 	var chl sync.Mutex
 	var channels []Sub
 
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
-	pubsub.BroadcastFunc = func(message *supabaiza.Message, timeout time.Duration) error {
+	pubsub.BroadcastFunc = func(message *Message, timeout time.Duration) error {
 		sl.Lock()
 		defer sl.Unlock()
 
@@ -245,7 +243,7 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 		}
 		return nil
 	}
-	pubsub.ChannelFunc = func(topic string, callback supabaiza.ChannelResponse) supabaiza.Channel {
+	pubsub.ChannelFunc = func(topic string, callback ChannelResponse) Channel {
 		chl.Lock()
 		defer chl.Unlock()
 		var noChannel NoPubSubChannel
@@ -257,9 +255,9 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 		return &noChannel
 	}
 
-	var templateRegistry = supabaiza.NewWorkerTemplateRegistry()
+	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
-	var hub = supabaiza.NewActionHub(
+	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
@@ -276,10 +274,10 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	require.Len(t, channels, 1)
 	chl.Unlock()
 
-	require.NoError(t, pubsub.Broadcast(&supabaiza.Message{
+	require.NoError(t, pubsub.Broadcast(&Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}, 0))
 
@@ -295,15 +293,15 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	hub.Wait()
 }
 
-func sayHelloAction(ctx context.Context, ack chan struct{}) supabaiza.ActionWorkerGroupCreator {
-	return func(config supabaiza.ActionWorkerConfig) *supabaiza.ActionWorkerGroup {
-		config.Instance = supabaiza.ScalingInstances
-		config.Behaviour = supabaiza.RestartAll
-		config.Action = func(ctx context.Context, to string, message *supabaiza.Message, pubsub supabaiza.PubSub) {
-			pubsub.Broadcast(&supabaiza.Message{
+func sayHelloAction(ctx context.Context, ack chan struct{}) ActionWorkerGroupCreator {
+	return func(config ActionWorkerConfig) *ActionWorkerGroup {
+		config.Instance = ScalingInstances
+		config.Behaviour = RestartAll
+		config.Action = func(ctx context.Context, to string, message *Message, pubsub PubSub) {
+			pubsub.Broadcast(&Message{
 				Topic:    message.FromAddr,
 				FromAddr: to,
-				Payload:  supabaiza.BinaryPayload("Hello"),
+				Payload:  BinaryPayload("Hello"),
 				Metadata: nil,
 			}, 0)
 
@@ -315,6 +313,6 @@ func sayHelloAction(ctx context.Context, ack chan struct{}) supabaiza.ActionWork
 			}
 
 		}
-		return supabaiza.NewWorkGroup(config)
+		return NewWorkGroup(config)
 	}
 }

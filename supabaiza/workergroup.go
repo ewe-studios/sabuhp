@@ -524,6 +524,15 @@ func (mg *MasterWorkerGroup) AddSlave(slave *ActionWorkerGroup) {
 	mg.Slaves[slave.config.Addr] = slave
 }
 
+func (mg *MasterWorkerGroup) Stats() []WorkerStat {
+	var stats = make([]WorkerStat, 0, len(mg.Slaves)+1)
+	stats = append(stats, mg.Master.Stats())
+	for _, slave := range mg.Slaves {
+		stats = append(stats, slave.Stats())
+	}
+	return stats
+}
+
 func (mg *MasterWorkerGroup) Start() {
 	mg.Master.Start()
 	for _, slave := range mg.Slaves {

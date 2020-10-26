@@ -1,4 +1,4 @@
-package supabaiza_test
+package supabaiza
 
 import (
 	"context"
@@ -6,29 +6,27 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/influx6/sabuhp/supabaiza"
 )
 
 func TestMailbox_StartAndStop(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		context.Background(),
 		"hello",
 		logger,
@@ -48,22 +46,22 @@ func TestMailbox_StartAndStopWithCancel(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		ctx,
 		"hello",
 		logger,
@@ -86,22 +84,22 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		ctx,
 		"hello",
 		logger,
@@ -112,15 +110,15 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &supabaiza.Message{
+	var message = &Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{})
-	var channel = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -138,22 +136,22 @@ func TestMailbox_2Subscribers(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		ctx,
 		"hello",
 		logger,
@@ -164,22 +162,22 @@ func TestMailbox_2Subscribers(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &supabaiza.Message{
+	var message = &Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 2)
-	var channel1 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -198,22 +196,22 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		ctx,
 		"hello",
 		logger,
@@ -224,30 +222,30 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &supabaiza.Message{
+	var message = &Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel3 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -277,22 +275,22 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		ctx,
 		"hello",
 		logger,
@@ -303,30 +301,30 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &supabaiza.Message{
+	var message = &Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel3 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -356,22 +354,22 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 	var logger = &LoggerPub{}
 	var pubsub = &NoPubSub{}
 	var transport = &TransportImpl{
-		ConnFunc: func() supabaiza.Conn {
+		ConnFunc: func() Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+		ListenFunc: func(topic string, handler TransportResponse) Channel {
 			return nil
 		},
-		SendToAllFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
-		SendToOneFunc: func(data *supabaiza.Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *Message, timeout time.Duration) error {
 			return nil
 		},
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var helloMailbox = supabaiza.NewMailbox(
+	var helloMailbox = NewMailbox(
 		ctx,
 		"hello",
 		logger,
@@ -382,30 +380,30 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &supabaiza.Message{
+	var message = &Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  supabaiza.BinaryPayload("alex"),
+		Payload:  BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *supabaiza.Message, sub supabaiza.PubSub) {
+	var channel3 = helloMailbox.Add(func(data *Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}

@@ -1,17 +1,23 @@
-package supabaiza_test
+package testingutils
 
 import (
 	"log"
 	"time"
 
-	"github.com/influx6/npkg/njson"
-
 	"github.com/influx6/sabuhp/supabaiza"
+
+	"github.com/influx6/npkg/njson"
 )
 
 var _ supabaiza.Channel = (*NoPubSubChannel)(nil)
 
-type NoPubSubChannel struct{}
+type NoPubSubChannel struct {
+	Error error
+}
+
+func (n NoPubSubChannel) Err() error {
+	return n.Error
+}
 
 func (n NoPubSubChannel) Close() {
 	// do nothing

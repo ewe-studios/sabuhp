@@ -24,15 +24,19 @@ type ChannelResponse func(data *Message, sub PubSub)
 // closed and stopped from receiving updates.
 type Channel interface {
 	Close()
+	Err() error
 }
 
 // Conn defines the connection type which we can retrieve
 // and understand the type.
-type Conn interface {
-	Type() int
+type Conn interface{}
+
+type MessageErr interface {
+	error
+	ShouldAck() bool
 }
 
-type TransportResponse func(*Message)
+type TransportResponse func(*Message, Transport) MessageErr
 
 // Transport defines what an underline transport system provides.
 type Transport interface {
@@ -81,6 +85,10 @@ type mailboxChannel struct {
 
 	left  *mailboxChannel
 	right *mailboxChannel
+}
+
+func (mc *mailboxChannel) Err() error {
+	return nil
 }
 
 func (mc *mailboxChannel) deliver(msg *Message) {
@@ -302,7 +310,7 @@ func (ps *Mailbox) manage() {
 }
 
 func (ps *Mailbox) listen() {
-	ps.transportChannel = ps.transport.Listen(ps.topic, func(data *Message) {
+	ps.transportChannel = ps.transport.Listen(ps.topic, func(data *Message, t Transport) MessageErr {
 		if deliveryErr := ps.Deliver(data); deliveryErr != nil {
 			ps.logger.Log(njson.MJSON("failed to Deliver decoded message to mailbox", func(event npkg.Encoder) {
 				event.String("data", data.String())
@@ -310,6 +318,7 @@ func (ps *Mailbox) listen() {
 				event.String("error", nerror.WrapOnly(deliveryErr).Error())
 			}))
 		}
+		return nil
 	})
 }
 

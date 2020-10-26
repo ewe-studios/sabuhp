@@ -173,14 +173,12 @@ type ActionHub struct {
 	ender              *sync.Once
 	starter            *sync.Once
 	actionCommands     chan ActionWorkerRequest
+	actionChannel      chan func()
 	escalationCommands chan Escalation
 	waiter             sync.WaitGroup
 
 	masterGroupsMutex sync.RWMutex
 	masterGroups      map[string]*MasterWorkerGroup
-
-	//workerInstancesMutex sync.RWMutex
-	//workerGroupInstances map[string]*ActionWorkerGroup
 
 	workerChannelMutex  sync.RWMutex
 	workerGroupChannels map[string]Channel
@@ -275,6 +273,10 @@ func (ah *ActionHub) do(
 	return <-req.Err
 }
 
+func (ah *ActionHub) Stats() []WorkerStat {
+	return ah.getStats()
+}
+
 func (ah *ActionHub) Wait() {
 	ah.waiter.Wait()
 }
@@ -303,6 +305,9 @@ func (ah *ActionHub) init() {
 	}
 	if ah.workerGroupChannels == nil {
 		ah.workerGroupChannels = map[string]Channel{}
+	}
+	if ah.actionChannel == nil {
+		ah.actionChannel = make(chan func())
 	}
 	if ah.actionCommands == nil {
 		ah.actionCommands = make(chan ActionWorkerRequest)
@@ -338,6 +343,8 @@ loopRunner:
 		select {
 		case <-ah.Context.Done():
 			break loopRunner
+		case doFn := <-ah.actionChannel:
+			doFn()
 		case req := <-ah.actionCommands:
 			ah.createActionWorker(req)
 			continue loopRunner
@@ -547,6 +554,18 @@ func (ah *ActionHub) getMasterGroup(actionName string) *MasterWorkerGroup {
 	}
 	ah.masterGroupsMutex.RUnlock()
 	return group
+}
+
+func (ah *ActionHub) getStats() []WorkerStat {
+	var stats []WorkerStat
+	ah.masterGroupsMutex.RLock()
+	{
+		for _, worker := range ah.masterGroups {
+			stats = append(stats, worker.Stats()...)
+		}
+	}
+	ah.masterGroupsMutex.RUnlock()
+	return stats
 }
 
 func (ah *ActionHub) rmMasterGroup(actionName string) {

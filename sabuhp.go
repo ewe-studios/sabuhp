@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"io"
 	"mime/multipart"
+	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -89,6 +91,8 @@ type Request struct {
 	Cookies          []Cookie
 	Body             io.ReadCloser
 	Headers          Header
+	Conn             net.Conn
+	Req              *http.Request
 }
 
 // Response is an implementation of http.ResponseWriter that
