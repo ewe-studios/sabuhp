@@ -56,6 +56,7 @@ type LoggerPub struct{}
 
 func (l LoggerPub) Log(cb *njson.JSON) {
 	log.Println(cb.Message())
+	log.Println("")
 }
 
 type TransportImpl struct {

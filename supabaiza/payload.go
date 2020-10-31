@@ -49,13 +49,19 @@ type Message struct {
 	FromAddr string
 
 	// Payload is the payload for giving message.
-	Payload interface{}
+	Payload []byte
+
+	// LocalPayload is the payload attached which can be a
+	// concrete object for which this message is to communicate
+	// such a payload may not be able to be serialized and only
+	// serves the purpose of a local runtime communication.
+	LocalPayload Payload
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
 }
 
-func NewMessage(topic string, fromAddr string, payload Payload, meta map[string]string) *Message {
+func NewMessage(topic string, fromAddr string, payload []byte, meta map[string]string, localPayload Payload) *Message {
 	return &Message{
 		Topic:    topic,
 		FromAddr: fromAddr,
@@ -68,13 +74,16 @@ func (m *Message) String() string {
 	var content strings.Builder
 	content.WriteString("topic: ")
 	content.WriteString(m.Topic)
-	content.WriteString("\n")
+	content.WriteString(",")
 	content.WriteString("from: ")
 	content.WriteString(m.FromAddr)
-	content.WriteString("\n")
+	content.WriteString(",")
 	content.WriteString("payload: ")
-	content.WriteString(fmt.Sprintf("%#q", m.Payload))
-	content.WriteString("\n")
+	content.WriteString(fmt.Sprintf("%q", m.Payload))
+	content.WriteString(",")
+	content.WriteString("local_payload: ")
+	content.WriteString(fmt.Sprintf("%q", m.LocalPayload))
+	content.WriteString(",")
 	content.WriteString("Meta: ")
 	for key, val := range m.Metadata {
 		content.WriteString(key)
@@ -82,7 +91,7 @@ func (m *Message) String() string {
 		content.WriteString(val)
 		content.WriteString(",")
 	}
-	content.WriteString("\n")
+	content.WriteString(";")
 	return content.String()
 }
 
@@ -95,11 +104,9 @@ func (m *Message) Copy() *Message {
 	}
 	var clone = *m
 	clone.Metadata = meta
-
-	if payloadType, isPayload := m.Payload.(Payload); isPayload {
-		clone.Payload = payloadType.Copy()
-	} else {
-		clone.Payload = m.Payload
+	clone.Payload = append([]byte{}, m.Payload...)
+	if m.LocalPayload != nil {
+		clone.LocalPayload = m.LocalPayload.Copy()
 	}
 
 	return &clone

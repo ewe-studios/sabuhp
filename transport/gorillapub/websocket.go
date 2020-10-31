@@ -196,7 +196,7 @@ func (gh *GorillaHub) HandleSocket(socket *websocket.Conn) SocketHandler {
 	var done = make(chan SocketHandler, 1)
 
 	gh.waiter.Add(1)
-	gh.doFunc <- func() {
+	var doFunc = func() {
 		var config SocketConfig
 		config.Ctx = gh.ctx
 		config.Conn = socket
@@ -242,11 +242,20 @@ func (gh *GorillaHub) HandleSocket(socket *websocket.Conn) SocketHandler {
 		done <- &gorillaSockHandler{socket: gorilla}
 	}
 
+	// send function into work goroutiner.
+	select {
+	case gh.doFunc <- doFunc:
+		break
+	case <-gh.ctx.Done():
+		gh.waiter.Done()
+		break
+	}
+
+	// wait for done signal.
 	select {
 	case handler := <-done:
 		return handler
 	case <-gh.ctx.Done():
-		gh.waiter.Done()
 		return &utils.ErrorHandler{Err: nerror.WrapOnly(gh.ctx.Err())}
 	}
 }

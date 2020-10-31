@@ -542,7 +542,14 @@ func (r *PubSub) handleMessage(handler supabaiza.TransportResponse, message *red
 		}))
 	}
 
-	handler(decodedMessage, r)
+	if handleErr := handler(decodedMessage, r); handleErr != nil {
+		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
+			event.String("topic", message.Channel)
+			event.String("pattern", message.Pattern)
+			event.String("payload", message.Payload)
+			event.String("error", handleErr.Error())
+		}))
+	}
 }
 
 func (r *PubSub) SendToOne(data *supabaiza.Message, timeout time.Duration) error {

@@ -7,10 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influx6/npkg/nerror"
-	"github.com/influx6/sabuhp/utils"
-
 	"github.com/influx6/npkg"
+	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/sabuhp"
 	"github.com/influx6/sabuhp/supabaiza"
@@ -25,32 +23,40 @@ const (
 	NOTDONE     = "-NOK"
 )
 
-func NOTOK(message string, fromAddr string) supabaiza.Message {
-	return supabaiza.Message{
+func NOTOK(message string, fromAddr string) *supabaiza.Message {
+	return &supabaiza.Message{
 		Topic:    NOTDONE,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
 	}
 }
 
-func OK(message string, fromAddr string) supabaiza.Message {
-	return supabaiza.Message{
+func BasicMsg(topic string, message string, fromAddr string) *supabaiza.Message {
+	return &supabaiza.Message{
+		Topic:    topic,
+		FromAddr: fromAddr,
+		Payload:  []byte(message),
+	}
+}
+
+func OK(message string, fromAddr string) *supabaiza.Message {
+	return &supabaiza.Message{
 		Topic:    DONE,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
 	}
 }
 
-func UnsubscribeMessage(topic string, fromAddr string) supabaiza.Message {
-	return supabaiza.Message{
+func UnsubscribeMessage(topic string, fromAddr string) *supabaiza.Message {
+	return &supabaiza.Message{
 		Topic:    UNSUBSCRIBE,
 		FromAddr: fromAddr,
 		Payload:  []byte(topic),
 	}
 }
 
-func SubscribeMessage(topic string, fromAddr string) supabaiza.Message {
-	return supabaiza.Message{
+func SubscribeMessage(topic string, fromAddr string) *supabaiza.Message {
+	return &supabaiza.Message{
 		Topic:    SUBSCRIBE,
 		FromAddr: fromAddr,
 		Payload:  []byte(topic),
@@ -76,6 +82,7 @@ type GorillaPub struct {
 	starter   *sync.Once
 	ender     *sync.Once
 	doActions chan func()
+	chl       sync.RWMutex
 	channels  map[string]SocketRegistry
 }
 
@@ -170,76 +177,29 @@ func (gp *GorillaPub) Conn() supabaiza.Conn {
 	return nil
 }
 
-func (gp *GorillaPub) unListen(topic string, id nxid.ID) {
-	var doAction = func() {
-		if subscriptions, hasSubs := gp.channels[topic]; hasSubs {
-			delete(subscriptions, id)
-		}
-	}
-
-	select {
-	case gp.doActions <- doAction:
-		break
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to register socket due to ctx closure", func(event npkg.Encoder) {
-			event.String("hub_id", gp.config.ID.String())
-		}))
-	}
-}
-
-func (gp *GorillaPub) unListenSocket(topic string, socket *GorillaSocket) {
-	var doAction = func() {
-		if subscriptions, hasSubs := gp.channels[topic]; hasSubs {
-			for key, sub := range subscriptions {
-				if sub.socket == socket {
-					delete(subscriptions, key)
-				}
-			}
-		}
-	}
-
-	select {
-	case gp.doActions <- doAction:
-		break
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to register socket due to ctx closure", func(event npkg.Encoder) {
-			event.String("hub_id", gp.config.ID.String())
-		}))
-	}
-}
-
 // Listen creates a local subscription for listening to an underline message
 // for a giving topic.
 func (gp *GorillaPub) Listen(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
-	var result = make(chan supabaiza.Channel, 1)
+	var sub socketHub
+	sub.id = nxid.New()
+	sub.localFn = handler
 
-	var doAction = func() {
-		var sub socketHub
-		sub.id = nxid.New()
-		sub.localFn = handler
-
+	gp.chl.Lock()
+	{
 		var subscriptions, hasSubs = gp.channels[topic]
 		if !hasSubs {
 			subscriptions = map[nxid.ID]socketHub{}
-			gp.channels[topic] = subscriptions
 		}
 
 		subscriptions[sub.id] = sub
-		result <- &localSubscription{
-			id:    sub.id,
-			topic: topic,
-			pub:   gp,
-		}
+		gp.channels[topic] = subscriptions
 	}
+	gp.chl.Unlock()
 
-	select {
-	case gp.doActions <- doAction:
-		return <-result
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to register socket due to ctx closure", func(event npkg.Encoder) {
-			event.String("hub_id", gp.config.ID.String())
-		}))
-		return &utils.CloseErrorChannel{Error: nerror.WrapOnly(gp.ctx.Err())}
+	return &localSubscription{
+		id:    sub.id,
+		topic: topic,
+		pub:   gp,
 	}
 }
 
@@ -258,109 +218,101 @@ func (l *localSubscription) Close() {
 }
 
 func (gp *GorillaPub) listenToSocket(topic string, socket *GorillaSocket) {
-	var doAction = func() {
-		var sub socketHub
-		sub.id = nxid.New()
-		sub.socket = socket
+	var sub socketHub
+	sub.id = nxid.New()
+	sub.socket = socket
 
+	gp.chl.Lock()
+	{
 		var subscriptions, hasSubs = gp.channels[topic]
 		if !hasSubs {
 			subscriptions = map[nxid.ID]socketHub{}
-			gp.channels[topic] = subscriptions
 		}
 
 		subscriptions[sub.id] = sub
+		gp.channels[topic] = subscriptions
 	}
+	gp.chl.Unlock()
 
-	select {
-	case gp.doActions <- doAction:
-		return
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to register socket due to ctx closure", func(event npkg.Encoder) {
+	var okMessage = OK(gp.config.ID.String(), socket.socket.LocalAddr().String())
+	var okBytes, okBytesErr = gp.config.Codec.Encode(okMessage)
+	if okBytesErr != nil {
+		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
+			event.String("error", okBytesErr.Error())
 			event.String("socket_id", socket.id.String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
 	}
+
+	if sendErr := socket.Send(okBytes, gp.config.MaxWaitToSend); sendErr != nil {
+		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
+			event.String("hub_id", gp.config.ID.String())
+			event.String("error", okBytesErr.Error())
+			event.String("socket_id", socket.id.String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+		return
+	}
+
+	gp.config.Logger.Log(njson.MJSON("added socket as subscriber to topic", func(event npkg.Encoder) {
+		event.String("topic", topic)
+		event.String("hub_id", gp.config.ID.String())
+		event.String("socket_id", socket.id.String())
+		event.Object("socket_stat", socket.Stat())
+	}))
 }
 
 // SendToOne selects a random recipient which will receive the message to be delivered
 // for processing.
 func (gp *GorillaPub) SendToOne(data *supabaiza.Message, timeout time.Duration) error {
-	var result = make(chan error, 1)
-
-	var doAction = func() {
-		var encoded, encodedErr = gp.config.Codec.Encode(data)
-		if encodedErr != nil {
-			result <- nerror.WrapOnly(encodedErr)
-			return
-		}
-
-		var subscriptions, hasSubs = gp.channels[data.Topic]
-		if !hasSubs {
-			result <- nerror.New("no subscription for topic")
-			return
-		}
-
-		var listenersSize = len(subscriptions)
-		var randomCandidate = rand.Intn(listenersSize)
-
-		var idList = make([]nxid.ID, 0, listenersSize)
-		for id := range subscriptions {
-			idList = append(idList, id)
-		}
-
-		var candidate = subscriptions[idList[randomCandidate]]
-		gp.deliverMessage(data, encoded, &candidate)
-
-		close(result)
+	var encoded, encodedErr = gp.config.Codec.Encode(data)
+	if encodedErr != nil {
+		return nerror.WrapOnly(encodedErr)
 	}
 
-	select {
-	case gp.doActions <- doAction:
-		return <-result
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to register socket due to ctx closure", func(event npkg.Encoder) {
-			event.String("hub_id", gp.config.ID.String())
-		}))
-		return nerror.WrapOnly(gp.ctx.Err())
+	gp.chl.RLock()
+	var subscriptions, hasSubs = gp.channels[data.Topic]
+	if !hasSubs {
+		gp.chl.RUnlock()
+		return nerror.New("no subscription for topic")
 	}
+	gp.chl.RUnlock()
+
+	var listenersSize = len(subscriptions)
+	var randomCandidate = rand.Intn(listenersSize)
+
+	var idList = make([]nxid.ID, 0, listenersSize)
+	for id := range subscriptions {
+		idList = append(idList, id)
+	}
+
+	var candidate = subscriptions[idList[randomCandidate]]
+	gp.deliverMessage(data, encoded, &candidate)
+	return nil
 }
 
 // SendToAll delivers to all listeners the provided message within specific timeout.
 func (gp *GorillaPub) SendToAll(data *supabaiza.Message, timeout time.Duration) error {
-	var result = make(chan error, 1)
-
-	var doAction = func() {
-		var encoded, encodedErr = gp.config.Codec.Encode(data)
-		if encodedErr != nil {
-			result <- nerror.WrapOnly(encodedErr)
-			return
-		}
-
-		var subscriptions, hasSubs = gp.channels[data.Topic]
-		if !hasSubs {
-			result <- nerror.New("no subscription for topic")
-			return
-		}
-
-		for _, sub := range subscriptions {
-			gp.deliverMessage(data, encoded, &sub)
-		}
-
-		close(result)
+	var encoded, encodedErr = gp.config.Codec.Encode(data)
+	if encodedErr != nil {
+		return nerror.WrapOnly(encodedErr)
 	}
 
-	select {
-	case gp.doActions <- doAction:
-		return <-result
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to register socket due to ctx closure", func(event npkg.Encoder) {
-			event.String("hub_id", gp.config.ID.String())
-		}))
-		return nerror.WrapOnly(gp.ctx.Err())
+	gp.chl.RLock()
+	var subscriptions, hasSubs = gp.channels[data.Topic]
+	if !hasSubs {
+		gp.chl.RUnlock()
+		return nerror.New("no subscription for topic")
 	}
+	gp.chl.RUnlock()
+
+	for _, sub := range subscriptions {
+		gp.deliverMessage(data, encoded, &sub)
+	}
+
+	return nil
 }
 
 func (gp *GorillaPub) deliverMessage(data *supabaiza.Message, encodedMessage []byte, sub *socketHub) {
@@ -396,6 +348,44 @@ func (gp *GorillaPub) deliverMessage(data *supabaiza.Message, encodedMessage []b
 	}
 }
 
+func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *supabaiza.Message, socket *GorillaSocket) {
+	gp.config.Logger.Log(njson.MJSON("received message from socket", func(event npkg.Encoder) {
+		event.String("topic", data.Topic)
+		event.String("message", data.String())
+		event.String("hub_id", gp.config.ID.String())
+		event.String("socket_id", socket.id.String())
+		event.Object("socket_stat", socket.Stat())
+	}))
+
+	gp.chl.RLock()
+	var subscriptions, hasSubscription = gp.channels[data.Topic]
+	gp.chl.RUnlock()
+
+	if !hasSubscription {
+		gp.config.Logger.Log(njson.MJSON("no topic subscription exists", func(event npkg.Encoder) {
+			event.String("topic", data.Topic)
+			event.String("message", data.String())
+			event.String("hub_id", gp.config.ID.String())
+			event.String("socket_id", socket.id.String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+		return
+	}
+
+	gp.config.Logger.Log(njson.MJSON("topic subscription exists", func(event npkg.Encoder) {
+		event.Int("total_subscriptions", len(subscriptions))
+		event.String("topic", data.Topic)
+		event.String("message", data.String())
+		event.String("hub_id", gp.config.ID.String())
+		event.String("socket_id", socket.id.String())
+		event.Object("socket_stat", socket.Stat())
+	}))
+
+	for _, subs := range subscriptions {
+		gp.deliverMessage(data, b, &subs)
+	}
+}
+
 func (gp *GorillaPub) deliverMessageToSocket(data *supabaiza.Message, sub *GorillaSocket) error {
 	var encoded, encodedErr = gp.config.Codec.Encode(data)
 	if encodedErr != nil {
@@ -420,6 +410,47 @@ func (gp *GorillaPub) deliverMessageToSocket(data *supabaiza.Message, sub *Goril
 	return nil
 }
 
+func (gp *GorillaPub) unListen(topic string, id nxid.ID) {
+	gp.chl.Lock()
+	defer gp.chl.Unlock()
+	if subscriptions, hasSubs := gp.channels[topic]; hasSubs {
+		delete(subscriptions, id)
+	}
+}
+
+func (gp *GorillaPub) unListenSocket(topic string, socket *GorillaSocket) {
+	gp.chl.Lock()
+	if subscriptions, hasSubs := gp.channels[topic]; hasSubs {
+		for key, sub := range subscriptions {
+			if sub.socket == socket {
+				delete(subscriptions, key)
+			}
+		}
+	}
+	gp.chl.Unlock()
+
+	var okMessage = OK(gp.config.ID.String(), socket.socket.LocalAddr().String())
+	var okBytes, okBytesErr = gp.config.Codec.Encode(okMessage)
+	if okBytesErr != nil {
+		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
+			event.String("hub_id", gp.config.ID.String())
+			event.String("error", okBytesErr.Error())
+			event.String("socket_id", socket.id.String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+		return
+	}
+
+	if sendErr := socket.Send(okBytes, gp.config.MaxWaitToSend); sendErr != nil {
+		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
+			event.String("hub_id", gp.config.ID.String())
+			event.String("error", okBytesErr.Error())
+			event.String("socket_id", socket.id.String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+	}
+}
+
 func (gp *GorillaPub) manageSocketOpened(socket *GorillaSocket) {
 	if gp.config.OnOpen != nil {
 		gp.config.OnOpen(socket)
@@ -427,26 +458,16 @@ func (gp *GorillaPub) manageSocketOpened(socket *GorillaSocket) {
 }
 
 func (gp *GorillaPub) manageSocketClosed(socket *GorillaSocket) {
-	var doAction = func() {
-		// loop through all subscriptions and remove cases where
-		// such a socket is registered.
-		for _, subs := range gp.channels {
-			delete(subs, socket.ID())
-		}
-
-		if gp.config.OnClosure != nil {
-			gp.config.OnClosure(socket)
-		}
+	gp.chl.Lock()
+	// loop through all subscriptions and remove cases where
+	// such a socket is registered.
+	for _, subs := range gp.channels {
+		delete(subs, socket.ID())
 	}
+	gp.chl.Unlock()
 
-	select {
-	case gp.doActions <- doAction:
-		return
-	case <-gp.ctx.Done():
-		gp.config.Logger.Log(njson.MJSON("failed to deregister socket due to ctx closure", func(event npkg.Encoder) {
-			event.String("hub_id", gp.config.ID.String())
-		}))
-		return
+	if gp.config.OnClosure != nil {
+		gp.config.OnClosure(socket)
 	}
 }
 
@@ -463,24 +484,41 @@ func (gp *GorillaPub) handleSocketMessage(message []byte, socket *GorillaSocket)
 		return msgErr
 	}
 
-	var targetTopic, ok = msg.Payload.(string)
-	if !ok {
-		gp.config.Logger.Log(njson.MJSON("failed to check topic", func(event npkg.Encoder) {
+	var topicString = string(msg.Payload)
+	switch msg.Topic {
+	case SUBSCRIBE:
+		gp.config.Logger.Log(njson.MJSON("handling subscription message", func(event npkg.Encoder) {
+			event.String("topic", msg.Topic)
+			event.String("subscription_topic", topicString)
+			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("error", msgErr.Error())
-			event.String("topic", targetTopic)
-			event.String("message", string(message))
 			event.String("socket_id", socket.id.String())
 			event.Object("socket_stat", socket.Stat())
 		}))
-		return nerror.New("invalid message payload, expected string")
-	}
 
-	switch msg.Topic {
-	case SUBSCRIBE:
-		gp.listenToSocket(targetTopic, socket)
+		gp.listenToSocket(topicString, socket)
 	case UNSUBSCRIBE:
-		gp.unListenSocket(targetTopic, socket)
+		gp.config.Logger.Log(njson.MJSON("handling unsubscription message", func(event npkg.Encoder) {
+			event.String("topic", msg.Topic)
+			event.String("subscription_topic", topicString)
+			event.String("message", msg.String())
+			event.String("hub_id", gp.config.ID.String())
+			event.String("socket_id", socket.id.String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+
+		gp.unListenSocket(topicString, socket)
+	default:
+		gp.config.Logger.Log(njson.MJSON("sending message to possible subscribers", func(event npkg.Encoder) {
+			event.String("topic", msg.Topic)
+			event.String("subscription_topic", topicString)
+			event.String("message", msg.String())
+			event.String("hub_id", gp.config.ID.String())
+			event.String("socket_id", socket.id.String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+
+		gp.deliverMessageToSubs(message, msg, socket)
 	}
 	return nil
 }

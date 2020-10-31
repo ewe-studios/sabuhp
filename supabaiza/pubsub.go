@@ -36,6 +36,22 @@ type MessageErr interface {
 	ShouldAck() bool
 }
 
+func WrapErr(err error, shouldAck bool) MessageErr {
+	return messageErr{
+		error:     err,
+		shouldAck: shouldAck,
+	}
+}
+
+type messageErr struct {
+	error
+	shouldAck bool
+}
+
+func (m messageErr) ShouldAck() bool {
+	return m.shouldAck
+}
+
 type TransportResponse func(*Message, Transport) MessageErr
 
 // Transport defines what an underline transport system provides.

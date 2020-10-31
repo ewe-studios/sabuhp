@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/influx6/sabuhp/testingutils"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +17,7 @@ func createWorkerConfig(ctx context.Context, action Action, buffer int, max int)
 	return ActionWorkerConfig{
 		Context:             ctx,
 		MessageBufferSize:   buffer,
-		Pubsub:              &NoPubSub{},
+		Pubsub:              &testingutils.NoPubSub{},
 		Addr:                testName,
 		ActionName:          testName,
 		Action:              action,
@@ -46,7 +48,7 @@ func TestNewWorkGroup(t *testing.T) {
 	var group = NewWorkGroup(config)
 	group.Start()
 
-	var textPayload = TextPayload("Welcome to life")
+	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
 		require.NoError(t, group.HandleMessage(&Message{
 			Topic:    "find_user",
@@ -94,7 +96,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 	require.Equal(t, 2, stats.AvailableWorkerCapacity)
 	require.Equal(t, 1, stats.TotalCurrentWorkers)
 
-	var textPayload = TextPayload("Welcome to life")
+	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
 		require.NoError(t, group.HandleMessage(&Message{
 			Topic:    "find_user",
@@ -146,7 +148,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 
 	<-time.After(time.Second / 2)
 
-	var textPayload = TextPayload("Welcome to life")
+	var textPayload = []byte("Welcome to life")
 	var msg = &Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
@@ -196,7 +198,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	group.Start()
 
 	<-time.After(time.Second / 2)
-	var textPayload = TextPayload("Welcome to life")
+	var textPayload = []byte("Welcome to life")
 	require.NoError(t, group.HandleMessage(&Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
