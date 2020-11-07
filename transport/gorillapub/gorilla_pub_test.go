@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/influx6/sabuhp"
+
 	"github.com/influx6/sabuhp/supabaiza"
 
 	"github.com/influx6/npkg/nxid"
@@ -133,7 +135,7 @@ func TestGorillaPub_FunctionAndSocket(t *testing.T) {
 
 	var helloSubFuncChannel = pub.Listen(
 		"hello",
-		func(message *supabaiza.Message, transport supabaiza.Transport) supabaiza.MessageErr {
+		func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
 			var reply = BasicMsg("hello-reply", "hello "+string(message.Payload), "you")
 			var sendErr = transport.SendToOne(reply, 0)
 			if sendErr != nil {

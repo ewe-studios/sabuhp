@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/influx6/sabuhp/pubsub"
+
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/sabuhp"
@@ -14,7 +16,7 @@ import (
 	"github.com/influx6/npkg/nerror"
 )
 
-type Action func(ctx context.Context, to string, message *Message, pubsub PubSub)
+type Action func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub)
 
 // ActionWorkerGroupCreator exposes a method which takes a ActionWorkerConfig
 // which the function can modify as it sees fit and return
@@ -25,13 +27,13 @@ type SlaveWorkerRequest struct {
 	// ActionName represent the action name for this
 	// request work group, which identifiers in cases
 	// where the PubSubAddress has no value is the
-	// topic to listen for messages on.
+	// topic to listen for commands on.
 	ActionName string
 
 	// WorkerCreator is the creation function which will be supplied
 	// the initial ActionWorkerConfig which should be populated accordingly
 	// by the creator to create and return a ActionWorkerGroup which will
-	// service all messages for this action.
+	// service all commands for this action.
 	Action Action
 
 	// Attributes which are allowed for configuration in the WorkerGroupCreator
@@ -63,18 +65,18 @@ type ActionWorkerRequest struct {
 	// ActionName represent the action name for this
 	// request work group, which identifiers in cases
 	// where the PubSubAddress has no value is the
-	// topic to listen for messages on.
+	// topic to listen for commands on.
 	ActionName string
 
 	// PubSubTopic provides alternate means of redirecting
 	// a specific unique topic to this action worker, where
-	// messages for these are piped accordingly.
+	// commands for these are piped accordingly.
 	PubSubTopic string
 
 	// WorkerCreator is the creation function which will be supplied
 	// the initial ActionWorkerConfig which should be populated accordingly
 	// by the creator to create and return a ActionWorkerGroup which will
-	// service all messages for this action.
+	// service all commands for this action.
 	WorkerCreator ActionWorkerGroupCreator
 
 	// Slaves are personalized workers we want generated with this worker.
@@ -123,7 +125,7 @@ func (wc *ActionWorkerRequest) ensure() {
 // created to handle work for such actions.
 //
 // It provides the ActionHub a predefined set of templates to boot up action
-// worker groups based on messages for specific addresses.
+// worker groups based on commands for specific addresses.
 type WorkerTemplateRegistry struct {
 	templates map[string]ActionWorkerRequest
 }
@@ -160,10 +162,10 @@ func (ar *WorkerTemplateRegistry) Register(template ActionWorkerRequest) {
 type EscalationHandler func(escalation Escalation, hub *ActionHub)
 
 // ActionHub is a worker pool supervisor which sits to manage
-// the execution of functions deployed for processing of messages
+// the execution of functions deployed for processing of commands
 // asynchronously, each responding with another message if needed.
 type ActionHub struct {
-	Pubsub         PubSub
+	Pubsub         pubsub.PubSub
 	Logger         sabuhp.Logger
 	WorkRegistry   *WorkerTemplateRegistry
 	Context        context.Context
@@ -181,7 +183,7 @@ type ActionHub struct {
 	masterGroups      map[string]*MasterWorkerGroup
 
 	workerChannelMutex  sync.RWMutex
-	workerGroupChannels map[string]Channel
+	workerGroupChannels map[string]sabuhp.Channel
 	autoChannels        map[string]bool
 }
 
@@ -190,7 +192,7 @@ func NewActionHub(
 	ctx context.Context,
 	escalationHandler EscalationHandler,
 	templates *WorkerTemplateRegistry,
-	pubsub PubSub,
+	pubsub pubsub.PubSub,
 	logger sabuhp.Logger,
 ) *ActionHub {
 	var cntx, cancelFn = context.WithCancel(ctx)
@@ -205,11 +207,11 @@ func NewActionHub(
 }
 
 // Do registers giving action (based on actionName) with using action
-// name as address with the pubsub for receiving messages.
+// name as address with the pubsub for receiving commands.
 //
 // Actions generally are unique self contained pure functions describing
 // special case behaviours that perform some action and can if required
-// respond with other messages in return. There payloads are specific
+// respond with other commands in return. There payloads are specific
 // and known at implementation time, so that the contract of what an
 // action does are clear.
 //
@@ -301,10 +303,10 @@ func (ah *ActionHub) init() {
 		ah.masterGroups = map[string]*MasterWorkerGroup{}
 	}
 	if ah.workerGroupChannels == nil {
-		ah.workerGroupChannels = map[string]Channel{}
+		ah.workerGroupChannels = map[string]sabuhp.Channel{}
 	}
 	if ah.workerGroupChannels == nil {
-		ah.workerGroupChannels = map[string]Channel{}
+		ah.workerGroupChannels = map[string]sabuhp.Channel{}
 	}
 	if ah.actionChannel == nil {
 		ah.actionChannel = make(chan func())
@@ -368,7 +370,7 @@ func (ah *ActionHub) createAutoActionWorkers() {
 
 func (ah *ActionHub) createAutoActionWorker(req ActionWorkerRequest) {
 	var logger = ah.Logger
-	var workerChannel = ah.Pubsub.Channel(req.PubSubTopic, func(data *Message, sub PubSub) {
+	var workerChannel = ah.Pubsub.Channel(req.PubSubTopic, func(data *sabuhp.Message, sub pubsub.PubSub) {
 
 		// get or create worker group for request topic
 		var workerGroup *MasterWorkerGroup
@@ -407,7 +409,7 @@ func (ah *ActionHub) createActionWorker(req ActionWorkerRequest) {
 
 	var logger = ah.Logger
 	var workerGroup = ah.createMasterGroup(req)
-	var workerChannel = ah.Pubsub.Channel(req.PubSubTopic, func(data *Message, sub PubSub) {
+	var workerChannel = ah.Pubsub.Channel(req.PubSubTopic, func(data *sabuhp.Message, sub pubsub.PubSub) {
 		if err := workerGroup.Master.HandleMessage(data); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
@@ -445,7 +447,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	var slaveWorkerGroup = NewWorkGroup(workerConfig)
 	masterGroup.Slaves[slaveName] = slaveWorkerGroup
 
-	var workerChannel = ah.Pubsub.Channel(slaveName, func(data *Message, sub PubSub) {
+	var workerChannel = ah.Pubsub.Channel(slaveName, func(data *sabuhp.Message, sub pubsub.PubSub) {
 		if err := slaveWorkerGroup.HandleMessage(data); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
@@ -594,7 +596,7 @@ func (ah *ActionHub) hasWorkerChannel(channelTopic string) bool {
 	return hasWorkerGroup
 }
 
-func (ah *ActionHub) addWorkerChannel(channelTopic string, channel Channel) {
+func (ah *ActionHub) addWorkerChannel(channelTopic string, channel sabuhp.Channel) {
 	ah.workerChannelMutex.Lock()
 	{
 		ah.workerGroupChannels[channelTopic] = channel
@@ -603,7 +605,7 @@ func (ah *ActionHub) addWorkerChannel(channelTopic string, channel Channel) {
 }
 
 func (ah *ActionHub) closeWorkerChannel(channelTopic string) {
-	var channel Channel
+	var channel sabuhp.Channel
 	var hasChannel bool
 	var isAutoChannel bool
 
@@ -623,8 +625,8 @@ func (ah *ActionHub) closeWorkerChannel(channelTopic string) {
 	}
 }
 
-func (ah *ActionHub) getWorkerChannel(channelTopic string) Channel {
-	var channel Channel
+func (ah *ActionHub) getWorkerChannel(channelTopic string) sabuhp.Channel {
+	var channel sabuhp.Channel
 	ah.workerChannelMutex.RLock()
 	{
 		channel = ah.workerGroupChannels[channelTopic]
@@ -644,7 +646,7 @@ func (ah *ActionHub) isAutoChannel(channelTopic string) bool {
 }
 
 func (ah *ActionHub) endActionWorkers() {
-	var channels map[string]Channel
+	var channels map[string]sabuhp.Channel
 	var masterGroups map[string]*MasterWorkerGroup
 	//var workers map[string]*ActionWorkerGroup
 
@@ -652,7 +654,7 @@ func (ah *ActionHub) endActionWorkers() {
 	ah.workerChannelMutex.Lock()
 	{
 		channels = ah.workerGroupChannels
-		ah.workerGroupChannels = map[string]Channel{}
+		ah.workerGroupChannels = map[string]sabuhp.Channel{}
 	}
 	ah.workerChannelMutex.Unlock()
 

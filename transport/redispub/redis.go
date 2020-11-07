@@ -28,7 +28,8 @@ import (
 )
 
 const (
-	GroupExistErrorMsg = "BUSYGROUP Consumer Group name already exists"
+	GroupExistErrorMsg        = "BUSYGROUP Consumer Group name already exists"
+	SubscriptionExistsAlready = "Topic is already subscribed to"
 )
 
 // Channel implements the supabaiza.Channel interface.
@@ -52,7 +53,7 @@ var _ supabaiza.Transport = (*PubSub)(nil)
 type PubSubConfig struct {
 	Logger                    sabuhp.Logger
 	Ctx                       context.Context
-	Codec                     supabaiza.Codec
+	Codec                     sabuhp.Codec
 	Redis                     redis.Options
 	MaxWaitForSubConfirmation time.Duration
 	StreamMessageInterval     time.Duration
@@ -167,6 +168,15 @@ func (r *PubSub) Listen(topic string, handler supabaiza.TransportResponse) supab
 
 	r.waiter.Add(2)
 	var doFunc = func() {
+		if _, hasSub := r.subscriptions[topic]; hasSub {
+			var rs = new(redisSubscription)
+			rs.topic = topic
+			rs.host = r
+			rs.err = nerror.New(SubscriptionExistsAlready)
+			result <- rs
+			return
+		}
+
 		var pub = r.client.Subscribe(r.ctx, topic)
 		var streamName = fmt.Sprintf("%s_stream", topic)
 		var streamGroupName = fmt.Sprintf("%s_stream_group", topic)
@@ -552,7 +562,8 @@ func (r *PubSub) handleMessage(handler supabaiza.TransportResponse, message *red
 	}
 }
 
-func (r *PubSub) SendToOne(data *supabaiza.Message, timeout time.Duration) error {
+func (r *PubSub) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
+	data.Delivery = sabuhp.SendToOne
 	var encodedData, encodeErr = r.config.Codec.Encode(data)
 	if encodeErr != nil {
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
@@ -603,7 +614,8 @@ func (r *PubSub) SendToOne(data *supabaiza.Message, timeout time.Duration) error
 	return nil
 }
 
-func (r *PubSub) SendToAll(data *supabaiza.Message, timeout time.Duration) error {
+func (r *PubSub) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
+	data.Delivery = sabuhp.SendToAll
 	var encodedData, encodeErr = r.config.Codec.Encode(data)
 	if encodeErr != nil {
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {

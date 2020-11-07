@@ -1,8 +1,10 @@
-package supabaiza
+package sabuhp
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/influx6/npkg"
 )
 
 type PayloadType int
@@ -41,12 +43,27 @@ func (b BinaryPayload) Type() PayloadType {
 	return BinaryPayloadType
 }
 
+type DeliveryMark int
+
+const (
+	SendToAll DeliveryMark = iota
+	SendToOne
+)
+
 type Message struct {
 	// Topic for giving message (serving as to address).
 	Topic string
 
 	// FromAddr is the logical address of the sender of message.
 	FromAddr string
+
+	// Delivery embodies how this message is to be delivered. It's
+	// usually defined by the sender to indicate the target is all
+	// fan-out sequence (send to all) or a target sequence (sent to one).
+	//
+	// This should be set by the transport handling said message and not by
+	// creator.
+	Delivery DeliveryMark
 
 	// Payload is the payload for giving message.
 	Payload []byte
@@ -68,6 +85,14 @@ func NewMessage(topic string, fromAddr string, payload []byte, meta map[string]s
 		Payload:  payload,
 		Metadata: meta,
 	}
+}
+
+func (m *Message) EncodeObject(encoder npkg.ObjectEncoder) {
+	encoder.String("topic", m.Topic)
+	encoder.String("from_addr", m.FromAddr)
+	encoder.Bytes("Payload", m.Payload)
+	encoder.StringMap("meta_data", m.Metadata)
+	encoder.String("local_payload", fmt.Sprintf("%#v", m.LocalPayload))
 }
 
 func (m *Message) String() string {
@@ -95,7 +120,7 @@ func (m *Message) String() string {
 	return content.String()
 }
 
-// Copy returns a copy of this messages with underline data
+// Copy returns a copy of this commands with underline data
 // copied across. The copy
 func (m *Message) Copy() *Message {
 	var meta = map[string]string{}

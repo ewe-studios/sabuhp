@@ -1,28 +1,28 @@
-package supabaiza
+package pubsub
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/influx6/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
 
-var logger = &testingutils.LoggerPub{}
-var pubsub = &testingutils.NoPubSub{}
-var transport = &testingutils.TransportImpl{
-	ConnFunc: func() Conn {
+var logger = &loggerPub{}
+var pubsub = &noPubSub{}
+var transport = &transportImpl{
+	ConnFunc: func() sabuhp.Conn {
 		return nil
 	},
-	ListenFunc: func(topic string, handler TransportResponse) Channel {
+	ListenFunc: func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
 		return nil
 	},
-	SendToAllFunc: func(data *Message, timeout time.Duration) error {
+	SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 		return nil
 	},
-	SendToOneFunc: func(data *Message, timeout time.Duration) error {
+	SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 		return nil
 	},
 }
@@ -79,15 +79,15 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &Message{
+	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  BinaryPayload("alex"),
+		Payload:  sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{})
-	var channel = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -114,22 +114,22 @@ func TestMailbox_2Subscribers(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &Message{
+	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  BinaryPayload("alex"),
+		Payload:  sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 2)
-	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -157,30 +157,30 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &Message{
+	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  BinaryPayload("alex"),
+		Payload:  sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel3 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -219,30 +219,30 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &Message{
+	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  BinaryPayload("alex"),
+		Payload:  sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel3 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
@@ -281,30 +281,30 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 
 	helloMailbox.Start()
 
-	var message = &Message{
+	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  BinaryPayload("alex"),
+		Payload:  sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}
 	})
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *Message, sub PubSub) {
+	var channel3 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
 		require.Equal(t, message, data)
 		require.NotNil(t, sub)
 		delivered <- struct{}{}

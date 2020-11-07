@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/influx6/sabuhp/pubsub"
+
+	"github.com/influx6/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +19,7 @@ func createWorkerConfig(ctx context.Context, action Action, buffer int, max int)
 	return ActionWorkerConfig{
 		Context:             ctx,
 		MessageBufferSize:   buffer,
-		Pubsub:              &testingutils.NoPubSub{},
+		Pubsub:              &noPubSub{},
 		Addr:                testName,
 		ActionName:          testName,
 		Action:              action,
@@ -34,7 +36,7 @@ func TestNewWorkGroup(t *testing.T) {
 	count.Add(10)
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -50,7 +52,7 @@ func TestNewWorkGroup(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(&Message{
+		require.NoError(t, group.HandleMessage(&sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Payload:  textPayload,
@@ -73,7 +75,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -98,7 +100,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(&Message{
+		require.NoError(t, group.HandleMessage(&sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Payload:  textPayload,
@@ -122,7 +124,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
 			panic("Killed to restart")
 		},
 		1,
@@ -149,7 +151,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	<-time.After(time.Second / 2)
 
 	var textPayload = []byte("Welcome to life")
-	var msg = &Message{
+	var msg = &sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Payload:  textPayload,
@@ -173,7 +175,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *Message, pubsub PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
 			panic("Killed to restart")
 		},
 		1,
@@ -199,7 +201,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 
 	<-time.After(time.Second / 2)
 	var textPayload = []byte("Welcome to life")
-	require.NoError(t, group.HandleMessage(&Message{
+	require.NoError(t, group.HandleMessage(&sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Payload:  textPayload,

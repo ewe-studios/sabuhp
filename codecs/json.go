@@ -3,15 +3,16 @@ package codecs
 import (
 	"encoding/json"
 
+	"github.com/influx6/sabuhp"
+
 	"github.com/influx6/npkg/nerror"
-	"github.com/influx6/sabuhp/supabaiza"
 )
 
-var _ supabaiza.Codec = (*JsonCodec)(nil)
+var _ sabuhp.Codec = (*JsonCodec)(nil)
 
 type JsonCodec struct{}
 
-func (j *JsonCodec) Encode(message *supabaiza.Message) ([]byte, error) {
+func (j *JsonCodec) Encode(message *sabuhp.Message) ([]byte, error) {
 	encoded, encodedErr := json.Marshal(message)
 	if encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
@@ -20,12 +21,12 @@ func (j *JsonCodec) Encode(message *supabaiza.Message) ([]byte, error) {
 	return encoded, nil
 }
 
-func (j *JsonCodec) Decode(b []byte) (*supabaiza.Message, error) {
-	var message supabaiza.Message
+func (j *JsonCodec) Decode(b []byte) (*sabuhp.Message, error) {
+	var message sabuhp.Message
 	if jsonErr := json.Unmarshal(b, &message); jsonErr != nil {
 		return nil, nerror.WrapOnly(jsonErr)
 	}
 	return &message, nil
 }
 
-var _ supabaiza.Codec = (*MessagePackCodec)(nil)
+var _ sabuhp.Codec = (*MessagePackCodec)(nil)

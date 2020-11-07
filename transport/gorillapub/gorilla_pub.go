@@ -23,40 +23,40 @@ const (
 	NOTDONE     = "-NOK"
 )
 
-func NOTOK(message string, fromAddr string) *supabaiza.Message {
-	return &supabaiza.Message{
+func NOTOK(message string, fromAddr string) *sabuhp.Message {
+	return &sabuhp.Message{
 		Topic:    NOTDONE,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
 	}
 }
 
-func BasicMsg(topic string, message string, fromAddr string) *supabaiza.Message {
-	return &supabaiza.Message{
+func BasicMsg(topic string, message string, fromAddr string) *sabuhp.Message {
+	return &sabuhp.Message{
 		Topic:    topic,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
 	}
 }
 
-func OK(message string, fromAddr string) *supabaiza.Message {
-	return &supabaiza.Message{
+func OK(message string, fromAddr string) *sabuhp.Message {
+	return &sabuhp.Message{
 		Topic:    DONE,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
 	}
 }
 
-func UnsubscribeMessage(topic string, fromAddr string) *supabaiza.Message {
-	return &supabaiza.Message{
+func UnsubscribeMessage(topic string, fromAddr string) *sabuhp.Message {
+	return &sabuhp.Message{
 		Topic:    UNSUBSCRIBE,
 		FromAddr: fromAddr,
 		Payload:  []byte(topic),
 	}
 }
 
-func SubscribeMessage(topic string, fromAddr string) *supabaiza.Message {
-	return &supabaiza.Message{
+func SubscribeMessage(topic string, fromAddr string) *sabuhp.Message {
+	return &sabuhp.Message{
 		Topic:    SUBSCRIBE,
 		FromAddr: fromAddr,
 		Payload:  []byte(topic),
@@ -88,7 +88,7 @@ type GorillaPub struct {
 
 type PubConfig struct {
 	ID            nxid.ID
-	Codec         supabaiza.Codec
+	Codec         sabuhp.Codec
 	Ctx           context.Context
 	Logger        sabuhp.Logger
 	OnClosure     SocketNotification
@@ -266,7 +266,8 @@ func (gp *GorillaPub) listenToSocket(topic string, socket *GorillaSocket) {
 
 // SendToOne selects a random recipient which will receive the message to be delivered
 // for processing.
-func (gp *GorillaPub) SendToOne(data *supabaiza.Message, timeout time.Duration) error {
+func (gp *GorillaPub) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
+	data.Delivery = sabuhp.SendToOne
 	var encoded, encodedErr = gp.config.Codec.Encode(data)
 	if encodedErr != nil {
 		return nerror.WrapOnly(encodedErr)
@@ -294,7 +295,8 @@ func (gp *GorillaPub) SendToOne(data *supabaiza.Message, timeout time.Duration) 
 }
 
 // SendToAll delivers to all listeners the provided message within specific timeout.
-func (gp *GorillaPub) SendToAll(data *supabaiza.Message, timeout time.Duration) error {
+func (gp *GorillaPub) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
+	data.Delivery = sabuhp.SendToAll
 	var encoded, encodedErr = gp.config.Codec.Encode(data)
 	if encodedErr != nil {
 		return nerror.WrapOnly(encodedErr)
@@ -315,7 +317,7 @@ func (gp *GorillaPub) SendToAll(data *supabaiza.Message, timeout time.Duration) 
 	return nil
 }
 
-func (gp *GorillaPub) deliverMessage(data *supabaiza.Message, encodedMessage []byte, sub *socketHub) {
+func (gp *GorillaPub) deliverMessage(data *sabuhp.Message, encodedMessage []byte, sub *socketHub) {
 	defer func() {
 		if recoverErr := recover(); recoverErr != nil {
 			gp.config.Logger.Log(njson.MJSON("panic occurred", func(event npkg.Encoder) {
@@ -348,7 +350,7 @@ func (gp *GorillaPub) deliverMessage(data *supabaiza.Message, encodedMessage []b
 	}
 }
 
-func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *supabaiza.Message, socket *GorillaSocket) {
+func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *sabuhp.Message, socket *GorillaSocket) {
 	gp.config.Logger.Log(njson.MJSON("received message from socket", func(event npkg.Encoder) {
 		event.String("topic", data.Topic)
 		event.String("message", data.String())
@@ -386,7 +388,7 @@ func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *supabaiza.Message, so
 	}
 }
 
-func (gp *GorillaPub) deliverMessageToSocket(data *supabaiza.Message, sub *GorillaSocket) error {
+func (gp *GorillaPub) deliverMessageToSocket(data *sabuhp.Message, sub *GorillaSocket) error {
 	var encoded, encodedErr = gp.config.Codec.Encode(data)
 	if encodedErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {

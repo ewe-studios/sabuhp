@@ -1,4 +1,4 @@
-package sabuhp
+package httpub
 
 import (
 	"strings"

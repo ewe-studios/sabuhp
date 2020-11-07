@@ -1,4 +1,4 @@
-package supabaiza
+package pubsub
 
 import (
 	"context"
@@ -16,51 +16,7 @@ import (
 
 // ChannelResponse represents a message giving callback for
 // underline response.
-type ChannelResponse func(data *Message, sub PubSub)
-
-// Channel represents a generated subscription on a
-// topic which provides the giving callback an handler
-// to define the point at which the channel should be
-// closed and stopped from receiving updates.
-type Channel interface {
-	Close()
-	Err() error
-}
-
-// Conn defines the connection type which we can retrieve
-// and understand the type.
-type Conn interface{}
-
-type MessageErr interface {
-	error
-	ShouldAck() bool
-}
-
-func WrapErr(err error, shouldAck bool) MessageErr {
-	return messageErr{
-		error:     err,
-		shouldAck: shouldAck,
-	}
-}
-
-type messageErr struct {
-	error
-	shouldAck bool
-}
-
-func (m messageErr) ShouldAck() bool {
-	return m.shouldAck
-}
-
-type TransportResponse func(*Message, Transport) MessageErr
-
-// Transport defines what an underline transport system provides.
-type Transport interface {
-	Conn() Conn
-	Listen(topic string, handler TransportResponse) Channel
-	SendToOne(data *Message, timeout time.Duration) error
-	SendToAll(data *Message, timeout time.Duration) error
-}
+type ChannelResponse func(data *sabuhp.Message, sub PubSub)
 
 // PubSub defines the expectation for a pubsub delivery mechanism
 // which can be a redis, websocket or http endpoint or whatever
@@ -68,11 +24,11 @@ type Transport interface {
 type PubSub interface {
 
 	// Channel creates a callback which exists to receive specific
-	// messages on a giving topic. It returns a Channel specifically
+	// commands on a giving topic. It returns a Channel specifically
 	// for stopping responses to giving callback.
 	//
-	// See PubSub.EndChannel for ending all messages for a topic.
-	Channel(topic string, callback ChannelResponse) Channel
+	// See PubSub.EndChannel for ending all commands for a topic.
+	Channel(topic string, callback ChannelResponse) sabuhp.Channel
 
 	// Delegate delivers a message across the underline transport
 	// or to a local recipient if available with the express
@@ -86,12 +42,12 @@ type PubSub interface {
 	// underline transport is unable to support such usage.
 	//
 	// Understand
-	Delegate(message *Message, timeout time.Duration) error
+	Delegate(message *sabuhp.Message, timeout time.Duration) error
 
 	// Broadcast acts like traditional pubsub where the message
 	// is sent to all listening subscribers both local and remote.
 	// Allowing all process message accordingly.
-	Broadcast(message *Message, timeout time.Duration) error
+	Broadcast(message *sabuhp.Message, timeout time.Duration) error
 }
 
 // mailboxChannel houses a channel for a mailbox responder.
@@ -107,7 +63,7 @@ func (mc *mailboxChannel) Err() error {
 	return nil
 }
 
-func (mc *mailboxChannel) deliver(msg *Message) {
+func (mc *mailboxChannel) deliver(msg *sabuhp.Message) {
 	mc.mailbox.deliverTo(mc.callback, msg)
 	if mc.right != nil {
 		mc.right.deliver(msg)
@@ -162,10 +118,10 @@ type Mailbox struct {
 	ctx      context.Context
 
 	pubsub           PubSub
-	transport        Transport
-	transportChannel Channel
+	transport        sabuhp.Transport
+	transportChannel sabuhp.Channel
 
-	messages    chan *Message
+	messages    chan *sabuhp.Message
 	doChannel   chan func()
 	rootChannel *mailboxChannel
 	tailChannel *mailboxChannel
@@ -180,14 +136,14 @@ func NewMailbox(
 	logger sabuhp.Logger,
 	bufferSize int,
 	pubsub PubSub,
-	transport Transport,
+	transport sabuhp.Transport,
 ) *Mailbox {
 	var box = &Mailbox{
 		topic:     topic,
 		logger:    logger,
 		pubsub:    pubsub,
 		transport: transport,
-		messages:  make(chan *Message, bufferSize),
+		messages:  make(chan *sabuhp.Message, bufferSize),
 		doChannel: make(chan func()),
 	}
 	box.setCtx(ctx)
@@ -206,7 +162,7 @@ func (ps *Mailbox) setCtx(ctx context.Context) {
 	ps.canceler = canceler
 }
 
-func (ps *Mailbox) DeliverTimeout(message *Message, timeout time.Duration) error {
+func (ps *Mailbox) DeliverTimeout(message *sabuhp.Message, timeout time.Duration) error {
 	select {
 	case ps.messages <- message:
 		return nil
@@ -217,11 +173,11 @@ func (ps *Mailbox) DeliverTimeout(message *Message, timeout time.Duration) error
 	}
 }
 
-func (ps *Mailbox) MessageChannel() chan *Message {
+func (ps *Mailbox) MessageChannel() chan *sabuhp.Message {
 	return ps.messages
 }
 
-func (ps *Mailbox) Deliver(message *Message) error {
+func (ps *Mailbox) Deliver(message *sabuhp.Message) error {
 	select {
 	case ps.messages <- message:
 		return nil
@@ -326,7 +282,7 @@ func (ps *Mailbox) manage() {
 }
 
 func (ps *Mailbox) listen() {
-	ps.transportChannel = ps.transport.Listen(ps.topic, func(data *Message, t Transport) MessageErr {
+	ps.transportChannel = ps.transport.Listen(ps.topic, func(data *sabuhp.Message, t sabuhp.Transport) sabuhp.MessageErr {
 		if deliveryErr := ps.Deliver(data); deliveryErr != nil {
 			ps.logger.Log(njson.MJSON("failed to Deliver decoded message to mailbox", func(event npkg.Encoder) {
 				event.String("data", data.String())
@@ -344,7 +300,7 @@ func (ps *Mailbox) unListen() {
 	}
 }
 
-func (ps *Mailbox) deliverTo(responseHandler ChannelResponse, message *Message) {
+func (ps *Mailbox) deliverTo(responseHandler ChannelResponse, message *sabuhp.Message) {
 	defer func() {
 		if err := recover(); err != nil {
 			ps.logger.Log(njson.JSONB(func(event npkg.Encoder) {
@@ -367,7 +323,7 @@ type PubSubImpl struct {
 	logger        sabuhp.Logger
 	canceler      context.CancelFunc
 	ctx           context.Context
-	Transport     Transport
+	Transport     sabuhp.Transport
 	tml           sync.RWMutex
 	topicMappings map[string]*Mailbox
 }
@@ -376,7 +332,7 @@ func NewPubSubImpl(
 	ctx context.Context,
 	mailboxBuffer int,
 	logger sabuhp.Logger,
-	transport Transport,
+	transport sabuhp.Transport,
 ) *PubSubImpl {
 	var puber = &PubSubImpl{
 		logger:        logger,
@@ -436,8 +392,8 @@ func (p *PubSubImpl) manageMailbox(mailbox *Mailbox) {
 }
 
 // Channel creates necessary subscription to target topic on provided transport.
-// It also creates an internal mailbox for the delivery of those messages.
-func (p *PubSubImpl) Channel(topic string, callback ChannelResponse) Channel {
+// It also creates an internal mailbox for the delivery of those commands.
+func (p *PubSubImpl) Channel(topic string, callback ChannelResponse) sabuhp.Channel {
 	var mailbox = p.getTopic(topic)
 	if mailbox == nil {
 		mailbox = p.addTopic(topic, p.maxBuffer)
@@ -447,7 +403,7 @@ func (p *PubSubImpl) Channel(topic string, callback ChannelResponse) Channel {
 
 // Delegate will either Deliver message to local mailbox if topic has
 // a listener or send across transport using Transport.SendToOne.
-func (p *PubSubImpl) Delegate(message *Message, timeout time.Duration) error {
+func (p *PubSubImpl) Delegate(message *sabuhp.Message, timeout time.Duration) error {
 	// do we have a local handler for the message's target
 	var mailbox = p.getTopic(message.Topic)
 	if mailbox != nil {
@@ -464,6 +420,6 @@ func (p *PubSubImpl) Delegate(message *Message, timeout time.Duration) error {
 // the transport which means if there exists a listener on this publisher
 // then the transport depending on how it's setup will Deliver a copy to
 // the publisher as well.
-func (p *PubSubImpl) Broadcast(message *Message, timeout time.Duration) error {
+func (p *PubSubImpl) Broadcast(message *sabuhp.Message, timeout time.Duration) error {
 	return p.Transport.SendToAll(message, timeout)
 }

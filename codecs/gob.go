@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"encoding/gob"
 
+	"github.com/influx6/sabuhp"
+
 	"github.com/influx6/npkg/nerror"
-	"github.com/influx6/sabuhp/supabaiza"
 )
 
-var _ supabaiza.Codec = (*GobCodec)(nil)
+var _ sabuhp.Codec = (*GobCodec)(nil)
 
 type GobCodec struct{}
 
-func (j *GobCodec) Encode(message *supabaiza.Message) ([]byte, error) {
+func (j *GobCodec) Encode(message *sabuhp.Message) ([]byte, error) {
 	var buf bytes.Buffer
 	if encodedErr := gob.NewEncoder(&buf).Encode(message); encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
@@ -20,8 +21,8 @@ func (j *GobCodec) Encode(message *supabaiza.Message) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (j *GobCodec) Decode(b []byte) (*supabaiza.Message, error) {
-	var message supabaiza.Message
+func (j *GobCodec) Decode(b []byte) (*sabuhp.Message, error) {
+	var message sabuhp.Message
 	if jsonErr := gob.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
 		return nil, nerror.WrapOnly(jsonErr)
 	}

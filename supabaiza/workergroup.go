@@ -6,6 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/influx6/sabuhp/pubsub"
+
+	"github.com/influx6/sabuhp"
+
 	"github.com/influx6/npkg/nerror"
 )
 
@@ -63,14 +67,14 @@ type Escalation struct {
 	// for handling the worker protocol.
 	GroupProtocol EscalationProtocol
 
-	// PendingMessages are the messages left to be processed when
+	// PendingMessages are the commands left to be processed when
 	// an escalation occurred. It's only set when it's a KillAndEscalate
 	// protocol.
-	PendingMessages chan *Message
+	PendingMessages chan *sabuhp.Message
 
 	// OffendingMessage is the message which caused the PanicProtocol
 	// Only has a value when it's a PanicProtocol.
-	OffendingMessage *Message
+	OffendingMessage *sabuhp.Message
 }
 
 type WorkerEscalationHandler func(escalation *Escalation, wk *ActionWorkerGroup)
@@ -88,7 +92,7 @@ type ActionWorkerConfig struct {
 	Action              Action
 	MinWorker           int
 	MaxWorkers          int
-	Pubsub              PubSub
+	Pubsub              pubsub.PubSub
 	Behaviour           BehaviourType
 	Instance            InstanceType
 	Context             context.Context
@@ -169,7 +173,7 @@ type ActionWorkerGroup struct {
 	endWorker         chan struct{}
 	stoppedWorker     chan struct{}
 	escalationChannel chan Escalation
-	jobs              chan *Message
+	jobs              chan *sabuhp.Message
 	rm                sync.Mutex
 	restarting        bool
 }
@@ -187,7 +191,7 @@ func NewWorkGroup(config ActionWorkerConfig) *ActionWorkerGroup {
 	w.endWorker = make(chan struct{})
 	w.stoppedWorker = make(chan struct{})
 	w.availableSlots = int64(config.MaxWorkers)
-	w.jobs = make(chan *Message, config.MessageBufferSize)
+	w.jobs = make(chan *sabuhp.Message, config.MessageBufferSize)
 	w.escalationChannel = make(chan Escalation, config.MaxWorkers)
 	return &w
 }
@@ -272,7 +276,7 @@ func (w *ActionWorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *ActionWorkerGroup) HandleMessage(message *Message) error {
+func (w *ActionWorkerGroup) HandleMessage(message *sabuhp.Message) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -309,7 +313,7 @@ func (w *ActionWorkerGroup) doWork() {
 	atomic.AddInt64(&w.activeWorkers, 1)
 	atomic.AddInt64(&w.availableSlots, -1)
 
-	var currentMessage *Message
+	var currentMessage *sabuhp.Message
 
 	defer func() {
 		// signal active and available slots.

@@ -1,4 +1,4 @@
-package supabaiza
+package pubsub
 
 import (
 	"context"
@@ -6,31 +6,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/influx6/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestPubSub(t *testing.T) {
-	var logger = &testingutils.LoggerPub{}
+	var logger = &loggerPub{}
 
-	var listeners = map[string][]TransportResponse{}
+	var listeners = map[string][]sabuhp.TransportResponse{}
 
-	var transport = &testingutils.TransportImpl{
-		ConnFunc: func() Conn {
+	var transport = &transportImpl{
+		ConnFunc: func() sabuhp.Conn {
 			return nil
 		},
-		ListenFunc: func(topic string, handler TransportResponse) Channel {
+		ListenFunc: func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
 			listeners[topic] = append(listeners[topic], handler)
-			return &testingutils.NoPubSubChannel{}
+			return &noPubSubChannel{}
 		},
-		SendToAllFunc: func(data *Message, timeout time.Duration) error {
+		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			for _, handler := range listeners[data.Topic] {
 				handler(data, nil)
 			}
 			return nil
 		},
-		SendToOneFunc: func(data *Message, timeout time.Duration) error {
+		SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			var targetListeners = listeners[data.Topic]
 			if len(targetListeners) > 0 {
 				targetListeners[0](data, nil)
@@ -39,10 +39,10 @@ func TestPubSub(t *testing.T) {
 		},
 	}
 
-	var message = &Message{
+	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  BinaryPayload("alex"),
+		Payload:  sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
@@ -57,7 +57,7 @@ func TestPubSub(t *testing.T) {
 	var sendWaiter sync.WaitGroup
 	sendWaiter.Add(2)
 
-	var channel = pubsub.Channel("hello", func(data *Message, sub PubSub) {
+	var channel = pubsub.Channel("hello", func(data *sabuhp.Message, sub PubSub) {
 		defer sendWaiter.Done()
 		require.NotNil(t, data)
 		require.NotNil(t, sub)
