@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/influx6/npkg/nerror"
+	"github.com/influx6/sabuhp"
 
 	"github.com/stretchr/testify/require"
 
@@ -15,9 +16,134 @@ import (
 
 var upgrader = &websocket.Upgrader{
 	HandshakeTimeout:  time.Second * 5,
-	ReadBufferSize:    defaultMaxMessageSize,
-	WriteBufferSize:   defaultMaxMessageSize,
+	ReadBufferSize:    DefaultMaxMessageSize,
+	WriteBufferSize:   DefaultMaxMessageSize,
 	EnableCompression: false,
+}
+
+func TestGorillaClient(t *testing.T) {
+	var logger = &testingutils.LoggerPub{}
+	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
+	var hub = NewGorillaHub(HubConfig{
+		Ctx:    controlCtx,
+		Logger: logger,
+		Handler: func(b []byte, from sabuhp.Socket) error {
+			return from.Send(append([]byte("hello "), b...), 0)
+		},
+	})
+
+	hub.Start()
+
+	var wsUpgrader = HttpUpgrader(
+		logger,
+		hub,
+		upgrader,
+		nil,
+	)
+
+	var httpServer, wsConnAddr = testingutils.NewWSServerOnly(t, wsUpgrader)
+	require.NotNil(t, httpServer)
+	require.NotEmpty(t, wsConnAddr)
+
+	var message = make(chan []byte, 1)
+	var client, clientErr = GorillaClient(SocketConfig{
+		Ctx:      controlCtx,
+		Logger:   logger,
+		MaxRetry: 5,
+		RetryFn: func(last time.Duration) time.Duration {
+			return last + (time.Millisecond * 100)
+		},
+		Endpoint: DefaultEndpoint(wsConnAddr, 2*time.Second),
+		Handler: func(b []byte, from sabuhp.Socket) error {
+			require.NotEmpty(t, b)
+			require.NotNil(t, from)
+			message <- b
+			return nil
+		},
+	})
+	require.NoError(t, clientErr)
+	require.NotNil(t, client)
+
+	client.Start()
+
+	require.NoError(t, client.Send([]byte("alex"), 0))
+
+	var serverResponse = <-message
+	require.Equal(t, []byte("hello alex"), serverResponse)
+
+	controlStopFunc()
+
+	client.Wait()
+	hub.Wait()
+}
+
+func TestGorillaClientReconnect(t *testing.T) {
+	var logger = &testingutils.LoggerPub{}
+	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
+	var hub = NewGorillaHub(HubConfig{
+		Ctx:    controlCtx,
+		Logger: logger,
+		Handler: func(b []byte, from sabuhp.Socket) error {
+			return from.Send(append([]byte("hello "), b...), 0)
+		},
+	})
+
+	hub.Start()
+
+	var wsUpgrader = HttpUpgrader(
+		logger,
+		hub,
+		upgrader,
+		nil,
+	)
+
+	var httpServer, wsConnAddr = testingutils.NewWSServerOnly(t, wsUpgrader)
+	require.NotNil(t, httpServer)
+	require.NotEmpty(t, wsConnAddr)
+
+	var message = make(chan []byte, 1)
+	var client, clientErr = GorillaClient(SocketConfig{
+		Ctx:      controlCtx,
+		Logger:   logger,
+		MaxRetry: 5,
+		RetryFn: func(last time.Duration) time.Duration {
+			return last + (time.Millisecond * 100)
+		},
+		Endpoint: DefaultEndpoint(wsConnAddr, 1*time.Second),
+		Handler: func(b []byte, from sabuhp.Socket) error {
+			require.NotEmpty(t, b)
+			require.NotNil(t, from)
+			message <- b
+			return nil
+		},
+	})
+	require.NoError(t, clientErr)
+	require.NotNil(t, client)
+
+	client.Start()
+
+	var clientConn = client.Conn()
+	require.NotNil(t, clientConn)
+
+	require.NoError(t, client.Send([]byte("alex"), 0))
+
+	var serverResponse = <-message
+	require.Equal(t, []byte("hello alex"), serverResponse)
+
+	// close current connection
+	_ = clientConn.Close()
+
+	<-time.After(time.Millisecond * 30)
+
+	require.NoError(t, client.Send([]byte("alex"), 0))
+
+	var serverResponse2 = <-message
+	require.Equal(t, []byte("hello alex"), serverResponse2)
+
+	controlStopFunc()
+
+	client.Wait()
+	hub.Wait()
 }
 
 func TestGorillaHub(t *testing.T) {
@@ -26,21 +152,21 @@ func TestGorillaHub(t *testing.T) {
 	var hub = NewGorillaHub(HubConfig{
 		Ctx:    controlCtx,
 		Logger: logger,
-		Handler: func(b []byte, from *GorillaSocket) error {
+		Handler: func(b []byte, from sabuhp.Socket) error {
 			return from.Send(append([]byte("hello "), b...), 0)
 		},
 	})
 
 	hub.Start()
 
-	var wsHandler = HttpUpgrader(
+	var wsUpgrader = HttpUpgrader(
 		logger,
 		hub,
 		upgrader,
 		nil,
 	)
 
-	var httpServer, wsConn = testingutils.NewWSServer(t, wsHandler)
+	var httpServer, wsConn = testingutils.NewWSServer(t, wsUpgrader)
 	require.NotNil(t, httpServer)
 	require.NotNil(t, wsConn)
 
@@ -69,21 +195,21 @@ func TestGorillaHub_FailedMessage(t *testing.T) {
 	var hub = NewGorillaHub(HubConfig{
 		Ctx:    controlCtx,
 		Logger: logger,
-		Handler: func(b []byte, from *GorillaSocket) error {
+		Handler: func(b []byte, from sabuhp.Socket) error {
 			return nerror.New("bad socket")
 		},
 	})
 
 	hub.Start()
 
-	var wsHandler = HttpUpgrader(
+	var wsUpgrader = HttpUpgrader(
 		logger,
 		hub,
 		upgrader,
 		nil,
 	)
 
-	var httpServer, wsConn = testingutils.NewWSServer(t, wsHandler)
+	var httpServer, wsConn = testingutils.NewWSServer(t, wsUpgrader)
 	require.NotNil(t, httpServer)
 	require.NotNil(t, wsConn)
 
@@ -106,7 +232,7 @@ func TestGorillaHub_StatAfterClosure(t *testing.T) {
 	var hub = NewGorillaHub(HubConfig{
 		Ctx:    controlCtx,
 		Logger: logger,
-		Handler: func(b []byte, from *GorillaSocket) error {
+		Handler: func(b []byte, from sabuhp.Socket) error {
 			defer close(sent)
 			return from.Send(append([]byte("hello "), b...), 0)
 		},
@@ -114,14 +240,14 @@ func TestGorillaHub_StatAfterClosure(t *testing.T) {
 
 	hub.Start()
 
-	var wsHandler = HttpUpgrader(
+	var wsUpgrader = HttpUpgrader(
 		logger,
 		hub,
 		upgrader,
 		nil,
 	)
 
-	var httpServer, wsConn = testingutils.NewWSServer(t, wsHandler)
+	var httpServer, wsConn = testingutils.NewWSServer(t, wsUpgrader)
 	require.NotNil(t, httpServer)
 	require.NotNil(t, wsConn)
 

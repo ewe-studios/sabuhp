@@ -3,12 +3,11 @@ package httpub
 import (
 	"testing"
 
-	"github.com/influx6/sabuhp"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMuxRouter(t *testing.T) {
-	var mr = sabuhp.NewMux()
+	var mr = NewMux()
 	mr.UseHandleFunc("/reply", func(request *Request, params Params) Response {
 		require.NotNil(t, request)
 		require.Equal(t, request.URL.Path, "/reply")

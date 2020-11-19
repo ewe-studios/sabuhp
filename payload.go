@@ -2,21 +2,115 @@ package sabuhp
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
+
+	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg"
 )
+
+const (
+	SUBSCRIBE   = "+SUB"
+	UNSUBSCRIBE = "-USUB"
+	DONE        = "+OK"
+	NOTDONE     = "-NOK"
+)
+
+func NOTOK(message string, fromAddr string) *Message {
+	return &Message{
+		ID:       nxid.New(),
+		Topic:    NOTDONE,
+		FromAddr: fromAddr,
+		Payload:  []byte(message),
+	}
+}
+
+func BasicMsg(topic string, message string, fromAddr string) *Message {
+	return &Message{
+		ID:       nxid.New(),
+		Topic:    topic,
+		FromAddr: fromAddr,
+		Payload:  []byte(message),
+	}
+}
+
+func OK(message string, fromAddr string) *Message {
+	return &Message{
+		ID:       nxid.New(),
+		Topic:    DONE,
+		FromAddr: fromAddr,
+		Payload:  []byte(message),
+	}
+}
+
+func UnsubscribeMessage(topic string, fromAddr string) *Message {
+	return &Message{
+		ID:       nxid.New(),
+		Topic:    UNSUBSCRIBE,
+		FromAddr: fromAddr,
+		Payload:  []byte(topic),
+	}
+}
+
+func SubscribeMessage(topic string, fromAddr string) *Message {
+	return &Message{
+		ID:       nxid.New(),
+		Topic:    SUBSCRIBE,
+		FromAddr: fromAddr,
+		Payload:  []byte(topic),
+	}
+}
 
 type PayloadType int
 
 const (
 	BinaryPayloadType PayloadType = iota
 	TextPayloadType
+	HTTPRWPayload
 )
 
 type Payload interface {
 	Type() PayloadType
 	Copy() Payload
+}
+
+// HttpResponseAsPayload returns a *http.Response object wrapped
+// as a payload.
+func HttpResponseAsPayload(rw *http.Response) Payload {
+	return &HttpResponsePayload{rw}
+}
+
+// HttpResponsePayload wrapped a *http.Response as a Payload type.
+type HttpResponsePayload struct {
+	*http.Response
+}
+
+func (h *HttpResponsePayload) Type() PayloadType {
+	return HTTPRWPayload
+}
+
+func (h *HttpResponsePayload) Copy() Payload {
+	return h
+}
+
+// HttpResponseWriterAsPayload returns a http.ResponseWriter object wrapped
+// as a payload.
+func HttpResponseWriterAsPayload(rw http.ResponseWriter) Payload {
+	return &HttpResponseWriterPayload{rw}
+}
+
+// HttpResponseWriterPayload wrapped a http.ResponseWriter as a Payload type.
+type HttpResponseWriterPayload struct {
+	http.ResponseWriter
+}
+
+func (h *HttpResponseWriterPayload) Type() PayloadType {
+	return HTTPRWPayload
+}
+
+func (h *HttpResponseWriterPayload) Copy() Payload {
+	return h
 }
 
 type TextPayload string
@@ -51,6 +145,11 @@ const (
 )
 
 type Message struct {
+	// ID is the unique id attached to giving message
+	// for tracking it's delivery and trace its different touch
+	// points where it was handled.
+	ID nxid.ID
+
 	// Topic for giving message (serving as to address).
 	Topic string
 
@@ -76,15 +175,40 @@ type Message struct {
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
+
+	// Params are related facts attached to a message based on some route or
+	// sender and provide some values to keyed expectation, unlike metadata
+	// it has specific input in the message.
+	Params map[string]string
 }
 
-func NewMessage(topic string, fromAddr string, payload []byte, meta map[string]string, localPayload Payload) *Message {
+func NewMessage(topic string, fromAddr string, payload []byte) *Message {
 	return &Message{
+		ID:       nxid.New(),
 		Topic:    topic,
 		FromAddr: fromAddr,
 		Payload:  payload,
-		Metadata: meta,
 	}
+}
+
+func (m *Message) WithPayload(lp []byte) *Message {
+	m.Payload = lp
+	return m
+}
+
+func (m *Message) WithLocalPayload(lp Payload) *Message {
+	m.LocalPayload = lp
+	return m
+}
+
+func (m *Message) WithMetadata(meta map[string]string) *Message {
+	m.Metadata = meta
+	return m
+}
+
+func (m *Message) WithParams(params map[string]string) *Message {
+	m.Params = params
+	return m
 }
 
 func (m *Message) EncodeObject(encoder npkg.ObjectEncoder) {

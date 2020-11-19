@@ -14,6 +14,8 @@ import (
 	"github.com/influx6/sabuhp"
 )
 
+type SocketNotification func(socket sabuhp.Socket)
+
 // ChannelResponse represents a message giving callback for
 // underline response.
 type ChannelResponse func(data *sabuhp.Message, sub PubSub)
@@ -282,7 +284,7 @@ func (ps *Mailbox) manage() {
 }
 
 func (ps *Mailbox) listen() {
-	ps.transportChannel = ps.transport.Listen(ps.topic, func(data *sabuhp.Message, t sabuhp.Transport) sabuhp.MessageErr {
+	ps.transportChannel = ps.transport.Listen(ps.topic, sabuhp.TransportResponseFunc(func(data *sabuhp.Message, t sabuhp.Transport) sabuhp.MessageErr {
 		if deliveryErr := ps.Deliver(data); deliveryErr != nil {
 			ps.logger.Log(njson.MJSON("failed to Deliver decoded message to mailbox", func(event npkg.Encoder) {
 				event.String("data", data.String())
@@ -291,7 +293,7 @@ func (ps *Mailbox) listen() {
 			}))
 		}
 		return nil
-	})
+	}))
 }
 
 func (ps *Mailbox) unListen() {

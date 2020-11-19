@@ -109,7 +109,7 @@ func TestNewTransportManager(t *testing.T) {
 		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			var sector = listeners[data.Topic]
 			for _, handler := range sector {
-				if err := handler(data, nil); err != nil {
+				if err := handler.Handle(data, nil); err != nil {
 					var cj = njson.MJSON("error occurred")
 					cj.String("error", err.Error())
 					logger.Log(cj)
@@ -124,7 +124,7 @@ func TestNewTransportManager(t *testing.T) {
 		SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			var targetListeners = listeners[data.Topic]
 			if len(targetListeners) > 0 {
-				targetListeners[0](data, nil)
+				targetListeners[0].Handle(data, nil)
 			}
 			return nil
 		},
@@ -140,10 +140,10 @@ func TestNewTransportManager(t *testing.T) {
 		return nil
 	}
 
-	var topicChannel = manager.Listen("hello", doAction)
+	var topicChannel = manager.Listen("hello", sabuhp.TransportResponseFunc(doAction))
 	require.NotNil(t, topicChannel)
 
-	var topicChannel2 = manager.Listen("hello", doAction)
+	var topicChannel2 = manager.Listen("hello", sabuhp.TransportResponseFunc(doAction))
 	require.NotNil(t, topicChannel2)
 	require.NotEqual(t, topicChannel2, topicChannel)
 

@@ -1,4 +1,4 @@
-package gorillapub
+package expr
 
 import (
 	"context"
@@ -7,68 +7,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/influx6/sabuhp/transport/gorillapub"
+
+	"github.com/influx6/sabuhp/pubsub"
+
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/supabaiza"
-
 	"github.com/influx6/npkg/nxid"
+	"github.com/influx6/sabuhp"
 )
-
-const (
-	SUBSCRIBE   = "+SUB"
-	UNSUBSCRIBE = "-USUB"
-	DONE        = "+OK"
-	NOTDONE     = "-NOK"
-)
-
-func NOTOK(message string, fromAddr string) *sabuhp.Message {
-	return &sabuhp.Message{
-		Topic:    NOTDONE,
-		FromAddr: fromAddr,
-		Payload:  []byte(message),
-	}
-}
-
-func BasicMsg(topic string, message string, fromAddr string) *sabuhp.Message {
-	return &sabuhp.Message{
-		Topic:    topic,
-		FromAddr: fromAddr,
-		Payload:  []byte(message),
-	}
-}
-
-func OK(message string, fromAddr string) *sabuhp.Message {
-	return &sabuhp.Message{
-		Topic:    DONE,
-		FromAddr: fromAddr,
-		Payload:  []byte(message),
-	}
-}
-
-func UnsubscribeMessage(topic string, fromAddr string) *sabuhp.Message {
-	return &sabuhp.Message{
-		Topic:    UNSUBSCRIBE,
-		FromAddr: fromAddr,
-		Payload:  []byte(topic),
-	}
-}
-
-func SubscribeMessage(topic string, fromAddr string) *sabuhp.Message {
-	return &sabuhp.Message{
-		Topic:    SUBSCRIBE,
-		FromAddr: fromAddr,
-		Payload:  []byte(topic),
-	}
-}
 
 // socketHub can either be a GorillaSocket or
 // a message handler function for local listeners.
 type socketHub struct {
 	id      nxid.ID
-	socket  *GorillaSocket
-	localFn supabaiza.TransportResponse
+	socket  sabuhp.Socket
+	localFn sabuhp.TransportResponse
 }
 
 type SocketRegistry map[nxid.ID]socketHub
@@ -77,7 +32,7 @@ type GorillaPub struct {
 	ctx       context.Context
 	canceler  context.CancelFunc
 	config    PubConfig
-	hub       *GorillaHub
+	hub       *gorillapub.GorillaHub
 	waiter    sync.WaitGroup
 	starter   *sync.Once
 	ender     *sync.Once
@@ -91,9 +46,9 @@ type PubConfig struct {
 	Codec         sabuhp.Codec
 	Ctx           context.Context
 	Logger        sabuhp.Logger
-	OnClosure     SocketNotification
-	OnOpen        SocketNotification
-	ConfigHandler ConfigCreator
+	OnClosure     pubsub.SocketNotification
+	OnOpen        pubsub.SocketNotification
+	ConfigHandler gorillapub.ConfigCreator
 	MaxWaitToSend time.Duration
 }
 
@@ -102,7 +57,7 @@ func (b *PubConfig) ensure() {
 		panic("PubConfig.ID is required")
 	}
 	if b.Ctx == nil {
-		panic("PubConfig.Ctx is required")
+		panic("PubConfig.ctx is required")
 	}
 	if b.Logger == nil {
 		panic("PubConfig.Logger is required")
@@ -126,7 +81,7 @@ func NewGorillaPub(config PubConfig) *GorillaPub {
 		channels: map[string]SocketRegistry{},
 	}
 
-	pub.hub = NewGorillaHub(HubConfig{
+	pub.hub = gorillapub.NewGorillaHub(gorillapub.HubConfig{
 		Ctx:           newCtx,
 		Logger:        config.Logger,
 		Handler:       pub.handleSocketMessage,
@@ -150,7 +105,7 @@ func (gp *GorillaPub) Wait() {
 	gp.waiter.Wait()
 }
 
-func (gp *GorillaPub) Hub() *GorillaHub {
+func (gp *GorillaPub) Hub() *gorillapub.GorillaHub {
 	return gp.hub
 }
 
@@ -173,13 +128,13 @@ func (gp *GorillaPub) Start() {
 // Conn returns nil as the underline connection
 // is not a single instance. But a varying difference
 // sockets managed by the pub for message delivery.
-func (gp *GorillaPub) Conn() supabaiza.Conn {
+func (gp *GorillaPub) Conn() sabuhp.Conn {
 	return nil
 }
 
 // Listen creates a local subscription for listening to an underline message
 // for a giving topic.
-func (gp *GorillaPub) Listen(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+func (gp *GorillaPub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
 	var sub socketHub
 	sub.id = nxid.New()
 	sub.localFn = handler
@@ -217,7 +172,7 @@ func (l *localSubscription) Close() {
 	l.pub.unListen(l.topic, l.id)
 }
 
-func (gp *GorillaPub) listenToSocket(topic string, socket *GorillaSocket) {
+func (gp *GorillaPub) listenToSocket(topic string, socket sabuhp.Socket) {
 	var sub socketHub
 	sub.id = nxid.New()
 	sub.socket = socket
@@ -234,13 +189,13 @@ func (gp *GorillaPub) listenToSocket(topic string, socket *GorillaSocket) {
 	}
 	gp.chl.Unlock()
 
-	var okMessage = OK(gp.config.ID.String(), socket.socket.LocalAddr().String())
+	var okMessage = sabuhp.OK(gp.config.ID.String(), socket.LocalAddr().String())
 	var okBytes, okBytesErr = gp.config.Codec.Encode(okMessage)
 	if okBytesErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", okBytesErr.Error())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
@@ -250,7 +205,7 @@ func (gp *GorillaPub) listenToSocket(topic string, socket *GorillaSocket) {
 		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", okBytesErr.Error())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
@@ -259,7 +214,7 @@ func (gp *GorillaPub) listenToSocket(topic string, socket *GorillaSocket) {
 	gp.config.Logger.Log(njson.MJSON("added socket as subscriber to topic", func(event npkg.Encoder) {
 		event.String("topic", topic)
 		event.String("hub_id", gp.config.ID.String())
-		event.String("socket_id", socket.id.String())
+		event.String("socket_id", socket.ID().String())
 		event.Object("socket_stat", socket.Stat())
 	}))
 }
@@ -333,29 +288,29 @@ func (gp *GorillaPub) deliverMessage(data *sabuhp.Message, encodedMessage []byte
 			gp.config.Logger.Log(njson.MJSON("failed to deliver message to socket", func(event npkg.Encoder) {
 				event.String("hub_id", gp.config.ID.String())
 				event.String("error", socketSendErr.Error())
-				event.String("socket_id", sub.socket.id.String())
+				event.String("socket_id", sub.socket.ID().String())
 				event.Object("socket_stat", sub.socket.Stat())
 			}))
 		}
 		return
 	}
 
-	if err := sub.localFn(data, gp); nil != err {
+	if err := sub.localFn.Handle(data, gp); nil != err {
 		gp.config.Logger.Log(njson.MJSON("failed to handle message by function", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", err.Error())
-			event.String("socket_id", sub.socket.id.String())
+			event.String("socket_id", sub.socket.ID().String())
 			event.Object("socket_stat", sub.socket.Stat())
 		}))
 	}
 }
 
-func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *sabuhp.Message, socket *GorillaSocket) {
+func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *sabuhp.Message, socket sabuhp.Socket) {
 	gp.config.Logger.Log(njson.MJSON("received message from socket", func(event npkg.Encoder) {
 		event.String("topic", data.Topic)
 		event.String("message", data.String())
 		event.String("hub_id", gp.config.ID.String())
-		event.String("socket_id", socket.id.String())
+		event.String("socket_id", socket.ID().String())
 		event.Object("socket_stat", socket.Stat())
 	}))
 
@@ -368,7 +323,7 @@ func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *sabuhp.Message, socke
 			event.String("topic", data.Topic)
 			event.String("message", data.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
@@ -379,7 +334,7 @@ func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *sabuhp.Message, socke
 		event.String("topic", data.Topic)
 		event.String("message", data.String())
 		event.String("hub_id", gp.config.ID.String())
-		event.String("socket_id", socket.id.String())
+		event.String("socket_id", socket.ID().String())
 		event.Object("socket_stat", socket.Stat())
 	}))
 
@@ -388,13 +343,13 @@ func (gp *GorillaPub) deliverMessageToSubs(b []byte, data *sabuhp.Message, socke
 	}
 }
 
-func (gp *GorillaPub) deliverMessageToSocket(data *sabuhp.Message, sub *GorillaSocket) error {
+func (gp *GorillaPub) deliverMessageToSocket(data *sabuhp.Message, sub *gorillapub.GorillaSocket) error {
 	var encoded, encodedErr = gp.config.Codec.Encode(data)
 	if encodedErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", encodedErr.Error())
-			event.String("socket_id", sub.id.String())
+			event.String("socket_id", sub.ID().String())
 			event.Object("socket_stat", sub.Stat())
 		}))
 		return encodedErr
@@ -404,7 +359,7 @@ func (gp *GorillaPub) deliverMessageToSocket(data *sabuhp.Message, sub *GorillaS
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", encodedErr.Error())
-			event.String("socket_id", sub.id.String())
+			event.String("socket_id", sub.ID().String())
 			event.Object("socket_stat", sub.Stat())
 		}))
 		return sendErr
@@ -420,7 +375,7 @@ func (gp *GorillaPub) unListen(topic string, id nxid.ID) {
 	}
 }
 
-func (gp *GorillaPub) unListenSocket(topic string, socket *GorillaSocket) {
+func (gp *GorillaPub) unListenSocket(topic string, socket sabuhp.Socket) {
 	gp.chl.Lock()
 	if subscriptions, hasSubs := gp.channels[topic]; hasSubs {
 		for key, sub := range subscriptions {
@@ -431,13 +386,13 @@ func (gp *GorillaPub) unListenSocket(topic string, socket *GorillaSocket) {
 	}
 	gp.chl.Unlock()
 
-	var okMessage = OK(gp.config.ID.String(), socket.socket.LocalAddr().String())
+	var okMessage = sabuhp.OK(gp.config.ID.String(), socket.LocalAddr().String())
 	var okBytes, okBytesErr = gp.config.Codec.Encode(okMessage)
 	if okBytesErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", okBytesErr.Error())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
@@ -447,19 +402,19 @@ func (gp *GorillaPub) unListenSocket(topic string, socket *GorillaSocket) {
 		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", okBytesErr.Error())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 	}
 }
 
-func (gp *GorillaPub) manageSocketOpened(socket *GorillaSocket) {
+func (gp *GorillaPub) manageSocketOpened(socket sabuhp.Socket) {
 	if gp.config.OnOpen != nil {
 		gp.config.OnOpen(socket)
 	}
 }
 
-func (gp *GorillaPub) manageSocketClosed(socket *GorillaSocket) {
+func (gp *GorillaPub) manageSocketClosed(socket sabuhp.Socket) {
 	gp.chl.Lock()
 	// loop through all subscriptions and remove cases where
 	// such a socket is registered.
@@ -473,14 +428,14 @@ func (gp *GorillaPub) manageSocketClosed(socket *GorillaSocket) {
 	}
 }
 
-func (gp *GorillaPub) handleSocketMessage(message []byte, socket *GorillaSocket) error {
+func (gp *GorillaPub) handleSocketMessage(message []byte, socket sabuhp.Socket) error {
 	var msg, msgErr = gp.config.Codec.Decode(message)
 	if msgErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to decoded message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", msgErr.Error())
 			event.String("message", string(message))
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return msgErr
@@ -488,24 +443,24 @@ func (gp *GorillaPub) handleSocketMessage(message []byte, socket *GorillaSocket)
 
 	var topicString = string(msg.Payload)
 	switch msg.Topic {
-	case SUBSCRIBE:
+	case sabuhp.SUBSCRIBE:
 		gp.config.Logger.Log(njson.MJSON("handling subscription message", func(event npkg.Encoder) {
 			event.String("topic", msg.Topic)
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 
 		gp.listenToSocket(topicString, socket)
-	case UNSUBSCRIBE:
+	case sabuhp.UNSUBSCRIBE:
 		gp.config.Logger.Log(njson.MJSON("handling unsubscription message", func(event npkg.Encoder) {
 			event.String("topic", msg.Topic)
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 
@@ -516,7 +471,7 @@ func (gp *GorillaPub) handleSocketMessage(message []byte, socket *GorillaSocket)
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 

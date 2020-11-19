@@ -20,8 +20,6 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp/supabaiza"
-
 	redis "github.com/go-redis/redis/v8"
 
 	"github.com/influx6/npkg/nxid"
@@ -32,7 +30,7 @@ const (
 	SubscriptionExistsAlready = "Topic is already subscribed to"
 )
 
-// Channel implements the supabaiza.Channel interface.
+// Channel implements the sabuhp.Channel interface.
 type Channel struct {
 	id           nxid.ID
 	ctx          context.Context
@@ -48,7 +46,7 @@ func (r *Channel) Close() {
 	}
 }
 
-var _ supabaiza.Transport = (*PubSub)(nil)
+var _ sabuhp.Transport = (*PubSub)(nil)
 
 type PubSubConfig struct {
 	Logger                    sabuhp.Logger
@@ -65,7 +63,7 @@ func (b *PubSubConfig) ensure() {
 		panic("PubSubConfig.Logger is required")
 	}
 	if b.Ctx == nil {
-		panic("PubSubConfig.Ctx is required")
+		panic("PubSubConfig.ctx is required")
 	}
 	if b.Codec == nil {
 		b.Codec = &codecs.MessagePackCodec{}
@@ -144,7 +142,7 @@ func (r *PubSub) Stop() {
 	})
 }
 
-func (r *PubSub) Conn() supabaiza.Conn {
+func (r *PubSub) Conn() sabuhp.Conn {
 	return r.client
 }
 
@@ -163,8 +161,8 @@ func (r *PubSub) UnListen(topic string) {
 	}
 }
 
-func (r *PubSub) Listen(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
-	var result = make(chan supabaiza.Channel, 1)
+func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
+	var result = make(chan sabuhp.Channel, 1)
 
 	r.waiter.Add(2)
 	var doFunc = func() {
@@ -281,7 +279,7 @@ func (r *PubSub) Listen(topic string, handler supabaiza.TransportResponse) supab
 	}
 }
 
-var _ supabaiza.Channel = (*redisSubscription)(nil)
+var _ sabuhp.Channel = (*redisSubscription)(nil)
 
 type redisSubscription struct {
 	host  *PubSub
@@ -299,7 +297,7 @@ func (r *redisSubscription) Err() error {
 
 func (r *PubSub) listenForStream(
 	ctx context.Context,
-	handler supabaiza.TransportResponse,
+	handler sabuhp.TransportResponse,
 	pub *redisSub,
 	streamName string,
 	streamGroupName string,
@@ -406,7 +404,7 @@ doLoop:
 	}
 }
 
-func (r *PubSub) handleXMessage(topicName string, handler supabaiza.TransportResponse, message redis.XMessage) bool {
+func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportResponse, message redis.XMessage) bool {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred processing message", func(event npkg.Encoder) {
@@ -472,7 +470,7 @@ func (r *PubSub) handleXMessage(topicName string, handler supabaiza.TransportRes
 		}))
 	}
 
-	if handleErr := handler(decodedMessage, r); handleErr != nil {
+	if handleErr := handler.Handle(decodedMessage, r); handleErr != nil {
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", topicName)
 			event.String("message_id", message.ID)
@@ -490,7 +488,7 @@ func (r *PubSub) handleXMessage(topicName string, handler supabaiza.TransportRes
 
 func (r *PubSub) listenForChannel(
 	ctx context.Context,
-	handler supabaiza.TransportResponse,
+	handler sabuhp.TransportResponse,
 	pub *redisSub,
 	messages <-chan *redis.Message,
 ) {
@@ -531,7 +529,7 @@ doLoop:
 	}
 }
 
-func (r *PubSub) handleMessage(handler supabaiza.TransportResponse, message *redis.Message) {
+func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.Message) {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred handling pubsub message", func(event npkg.Encoder) {
@@ -552,7 +550,7 @@ func (r *PubSub) handleMessage(handler supabaiza.TransportResponse, message *red
 		}))
 	}
 
-	if handleErr := handler(decodedMessage, r); handleErr != nil {
+	if handleErr := handler.Handle(decodedMessage, r); handleErr != nil {
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", message.Channel)
 			event.String("pattern", message.Pattern)

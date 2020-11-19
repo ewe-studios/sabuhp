@@ -27,6 +27,15 @@ func HttpToWS(t *testing.T, u string) string {
 	return wsURL.String()
 }
 
+// NewWSServerOnly returns websocket http server and url for connecting.
+func NewWSServerOnly(t *testing.T, h http.Handler) (*httptest.Server, string) {
+	t.Helper()
+
+	s := httptest.NewServer(h)
+	wsURL := HttpToWS(t, s.URL)
+	return s, wsURL
+}
+
 func NewWSServer(t *testing.T, h http.Handler) (*httptest.Server, *websocket.Conn) {
 	t.Helper()
 

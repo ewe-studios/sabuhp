@@ -160,7 +160,7 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 	tm.chl.RUnlock()
 
 	// Create listener instruction to transport.
-	var transportChannel = tm.Transport.Listen(sub.topic, tm.Send)
+	var transportChannel = tm.Transport.Listen(sub.topic, sabuhp.TransportResponseFunc(tm.Send))
 
 	if transportErr := transportChannel.Err(); transportErr != nil {
 		sub.err = nerror.WrapOnly(transportErr)
@@ -190,7 +190,7 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 		newChannel.Run()
 
 		logStack.New().Info().
-			Message("removing subscription manager for topic").
+			Message("removing subscription transportManager for topic").
 			String("topic", sub.topic).
 			End()
 	}()
@@ -368,7 +368,7 @@ func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Tran
 					String("topic", sc.topic).
 					End()
 
-				if handleErr := subscriber(m, transport); handleErr != nil {
+				if handleErr := subscriber.Handle(m, transport); handleErr != nil {
 					logStack.New().Message("error occurred handled message").
 						Object("message", m).
 						String("topic", sc.topic).

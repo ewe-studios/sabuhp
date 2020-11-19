@@ -26,14 +26,14 @@ func TestPubSub(t *testing.T) {
 		},
 		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			for _, handler := range listeners[data.Topic] {
-				handler(data, nil)
+				handler.Handle(data, nil)
 			}
 			return nil
 		},
 		SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			var targetListeners = listeners[data.Topic]
 			if len(targetListeners) > 0 {
-				targetListeners[0](data, nil)
+				targetListeners[0].Handle(data, nil)
 			}
 			return nil
 		},

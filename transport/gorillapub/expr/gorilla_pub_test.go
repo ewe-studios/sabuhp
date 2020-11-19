@@ -1,12 +1,13 @@
-package gorillapub
+package expr
 
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/influx6/sabuhp/transport/gorillapub"
 
 	"github.com/influx6/sabuhp"
-
-	"github.com/influx6/sabuhp/supabaiza"
 
 	"github.com/influx6/npkg/nxid"
 
@@ -15,7 +16,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influx6/sabuhp/testingutils"
+
+	"github.com/Ewe-Studios/websocket"
 )
+
+var upgrader = &websocket.Upgrader{
+	HandshakeTimeout:  time.Second * 5,
+	ReadBufferSize:    gorillapub.DefaultMaxMessageSize,
+	WriteBufferSize:   gorillapub.DefaultMaxMessageSize,
+	EnableCompression: false,
+}
 
 func TestGorillaPub_StatAfterClosure(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
@@ -28,14 +38,14 @@ func TestGorillaPub_StatAfterClosure(t *testing.T) {
 		Ctx:    controlCtx,
 		Logger: logger,
 		Codec:  codec,
-		OnOpen: func(socket *GorillaSocket) {
+		OnOpen: func(socket sabuhp.Socket) {
 			close(newSocket)
 		},
 	})
 
 	pub.Start()
 
-	var wsHandler = HttpUpgrader(
+	var wsHandler = gorillapub.HttpUpgrader(
 		logger,
 		pub.Hub(),
 		upgrader,
@@ -66,14 +76,14 @@ func TestGorillaPub_SelfSubscribingSocket(t *testing.T) {
 		Ctx:    controlCtx,
 		Logger: logger,
 		Codec:  codec,
-		OnOpen: func(socket *GorillaSocket) {
+		OnOpen: func(socket sabuhp.Socket) {
 			close(newSocket)
 		},
 	})
 
 	pub.Start()
 
-	var wsHandler = HttpUpgrader(
+	var wsHandler = gorillapub.HttpUpgrader(
 		logger,
 		pub.Hub(),
 		upgrader,
@@ -88,7 +98,7 @@ func TestGorillaPub_SelfSubscribingSocket(t *testing.T) {
 
 	<-newSocket
 
-	var subscribeMessage, subErr = testingutils.EncodedMsg(codec, SUBSCRIBE, "hello", "me")
+	var subscribeMessage, subErr = testingutils.EncodedMsg(codec, sabuhp.SUBSCRIBE, "hello", "me")
 	require.NoError(t, subErr)
 	require.NotEmpty(t, subscribeMessage)
 
@@ -97,7 +107,7 @@ func TestGorillaPub_SelfSubscribingSocket(t *testing.T) {
 	var okMsg, okErr = testingutils.ReceiveMsg(t, wsConn, codec)
 	require.NoError(t, okErr)
 	require.NotEmpty(t, okMsg)
-	require.Equal(t, DONE, okMsg.Topic)
+	require.Equal(t, sabuhp.DONE, okMsg.Topic)
 
 	var topicMessage, topicErr = testingutils.EncodedMsg(codec, "hello", "alex", "me")
 	require.NoError(t, topicErr)
@@ -126,7 +136,7 @@ func TestGorillaPub_FunctionAndSocket(t *testing.T) {
 		Ctx:    controlCtx,
 		Logger: logger,
 		Codec:  codec,
-		OnOpen: func(socket *GorillaSocket) {
+		OnOpen: func(socket sabuhp.Socket) {
 			close(newSocket)
 		},
 	})
@@ -135,21 +145,21 @@ func TestGorillaPub_FunctionAndSocket(t *testing.T) {
 
 	var helloSubFuncChannel = pub.Listen(
 		"hello",
-		func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
-			var reply = BasicMsg("hello-reply", "hello "+string(message.Payload), "you")
+		sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			var reply = sabuhp.BasicMsg("hello-reply", "hello "+string(message.Payload), "you")
 			var sendErr = transport.SendToOne(reply, 0)
 			if sendErr != nil {
-				return supabaiza.WrapErr(sendErr, true)
+				return sabuhp.WrapErr(sendErr, true)
 			}
 			return nil
-		},
+		}),
 	)
 	require.NotNil(t, helloSubFuncChannel)
 	require.NoError(t, helloSubFuncChannel.Err())
 
 	defer helloSubFuncChannel.Close()
 
-	var wsHandler = HttpUpgrader(
+	var wsHandler = gorillapub.HttpUpgrader(
 		logger,
 		pub.Hub(),
 		upgrader,
@@ -164,7 +174,7 @@ func TestGorillaPub_FunctionAndSocket(t *testing.T) {
 
 	<-newSocket
 
-	var subscribeMessage, subErr = testingutils.EncodedMsg(codec, SUBSCRIBE, "hello-reply", "me")
+	var subscribeMessage, subErr = testingutils.EncodedMsg(codec, sabuhp.SUBSCRIBE, "hello-reply", "me")
 	require.NoError(t, subErr)
 	require.NotEmpty(t, subscribeMessage)
 
@@ -173,7 +183,7 @@ func TestGorillaPub_FunctionAndSocket(t *testing.T) {
 	var okMsg, okErr = testingutils.ReceiveMsg(t, wsConn, codec)
 	require.NoError(t, okErr)
 	require.NotEmpty(t, okMsg)
-	require.Equal(t, DONE, okMsg.Topic)
+	require.Equal(t, sabuhp.DONE, okMsg.Topic)
 
 	var topicMessage, topicErr = testingutils.EncodedMsg(codec, "hello", "alex", "me")
 	require.NoError(t, topicErr)

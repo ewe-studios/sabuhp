@@ -8,12 +8,10 @@ import (
 
 	"github.com/influx6/sabuhp"
 
-	"github.com/influx6/sabuhp/supabaiza"
-
 	"github.com/influx6/npkg/njson"
 )
 
-var _ supabaiza.Channel = (*NoPubSubChannel)(nil)
+var _ sabuhp.Channel = (*NoPubSubChannel)(nil)
 
 type NoPubSubChannel struct {
 	Error error
@@ -32,10 +30,10 @@ var _ pubsub.PubSub = (*NoPubSub)(nil)
 type NoPubSub struct {
 	DelegateFunc  func(message *sabuhp.Message, timeout time.Duration) error
 	BroadcastFunc func(message *sabuhp.Message, timeout time.Duration) error
-	ChannelFunc   func(topic string, callback pubsub.ChannelResponse) supabaiza.Channel
+	ChannelFunc   func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel
 }
 
-func (n NoPubSub) Channel(topic string, callback pubsub.ChannelResponse) supabaiza.Channel {
+func (n NoPubSub) Channel(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
 	if n.ChannelFunc != nil {
 		return n.ChannelFunc(topic, callback)
 	}
@@ -64,17 +62,17 @@ func (l LoggerPub) Log(cb *njson.JSON) {
 }
 
 type TransportImpl struct {
-	ConnFunc      func() supabaiza.Conn
+	ConnFunc      func() sabuhp.Conn
 	SendToOneFunc func(data *sabuhp.Message, timeout time.Duration) error
 	SendToAllFunc func(data *sabuhp.Message, timeout time.Duration) error
-	ListenFunc    func(topic string, handler supabaiza.TransportResponse) supabaiza.Channel
+	ListenFunc    func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel
 }
 
-func (t TransportImpl) Conn() supabaiza.Conn {
+func (t TransportImpl) Conn() sabuhp.Conn {
 	return t.ConnFunc()
 }
 
-func (t TransportImpl) Listen(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
+func (t TransportImpl) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
 	return t.ListenFunc(topic, handler)
 }
 

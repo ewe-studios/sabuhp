@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influx6/npkg/nerror"
-	"github.com/influx6/sabuhp/supabaiza"
 	"github.com/influx6/sabuhp/testingutils"
 )
 
@@ -106,13 +105,13 @@ func TestRedis_PubSub_SendToAll(t *testing.T) {
 
 	pb.Start()
 
-	var whyMessage = sabuhp.NewMessage("why", "me", sabuhp.BinaryPayload("yes"), map[string]string{})
-	var whatMessage = sabuhp.NewMessage("what", "me", sabuhp.BinaryPayload("yes"), map[string]string{})
+	var whyMessage = sabuhp.NewMessage("why", "me", []byte("yes"))
+	var whatMessage = sabuhp.NewMessage("what", "me", []byte("yes"))
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
 
-	var channel = pb.Listen("what", func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
+	var channel = pb.Listen("what", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 		delivered.Done()
 
 		if err := transport.SendToAll(whyMessage, 0); err != nil {
@@ -121,16 +120,16 @@ func TestRedis_PubSub_SendToAll(t *testing.T) {
 			}))
 		}
 		return nil
-	})
+	}))
 
 	require.NoError(t, channel.Err())
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why", func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
+	var channel2 = pb.Listen("why", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 		delivered.Done()
 		return nil
-	})
+	}))
 
 	require.NoError(t, channel2.Err())
 
@@ -161,13 +160,13 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 
 	pb.Start()
 
-	var whyMessage = sabuhp.NewMessage("why", "me", sabuhp.BinaryPayload("yes"), map[string]string{})
-	var whatMessage = sabuhp.NewMessage("what", "me", sabuhp.BinaryPayload("yes"), map[string]string{})
+	var whyMessage = sabuhp.NewMessage("why", "me", []byte("yes"))
+	var whatMessage = sabuhp.NewMessage("what", "me", []byte("yes"))
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
 
-	var channel = pb.Listen("what", func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
+	var channel = pb.Listen("what", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 		delivered.Done()
 		if err := transport.SendToOne(whyMessage, 0); err != nil {
 			logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
@@ -175,16 +174,16 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 			}))
 		}
 		return nil
-	})
+	}))
 
 	require.NoError(t, channel.Err())
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why", func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
+	var channel2 = pb.Listen("why", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 		delivered.Done()
 		return nil
-	})
+	}))
 
 	require.NoError(t, channel2.Err())
 

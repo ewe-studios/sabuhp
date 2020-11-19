@@ -1,46 +1,47 @@
-package gorillapub
+package pubsub
 
 import (
 	"context"
 	"time"
 
-	"github.com/influx6/sabuhp/pubsub"
-
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/supabaiza"
-
 	"github.com/influx6/npkg/nxid"
+	"github.com/influx6/sabuhp"
 )
 
-type PubSub struct {
-	ctx       context.Context
-	manager   *pubsub.TransportManager
-	canceler  context.CancelFunc
-	config    PubSubConfig
-	hub       *GorillaHub
-	doActions chan func()
+// Manager implements a concept which allows separation of actual
+// network transport protocol management from the actual pubsub operation
+// of subscription and message delivery.
+//
+// It uses a TransportManager to support multiple subscribers per topic (which somewhat
+// limits the capacity of tracking if each subscriber received all messages and redelivery)
+// but allows us use multiple protocols to talk to the same pubsub transportManager to handle message
+// delivery to and from these protocols.
+type Manager struct {
+	ctx              context.Context
+	transportManager *TransportManager
+	canceler         context.CancelFunc
+	config           ManagerConfig
 }
 
-type PubSubConfig struct {
+type ManagerConfig struct {
 	ID            nxid.ID
-	Transport     supabaiza.Transport
+	Transport     sabuhp.Transport
 	Codec         sabuhp.Codec
 	Ctx           context.Context
 	Logger        sabuhp.Logger
 	OnClosure     SocketNotification
 	OnOpen        SocketNotification
-	ConfigHandler ConfigCreator
 	MaxWaitToSend time.Duration
 }
 
-func (b *PubSubConfig) ensure() {
+func (b *ManagerConfig) ensure() {
 	if b.ID.IsNil() {
 		panic("PubConfig.ID is required")
 	}
 	if b.Ctx == nil {
-		panic("PubConfig.Ctx is required")
+		panic("PubConfig.ctx is required")
 	}
 	if b.Logger == nil {
 		panic("PubConfig.Logger is required")
@@ -53,58 +54,68 @@ func (b *PubSubConfig) ensure() {
 	}
 }
 
-func NewPubSub(config PubSubConfig) *PubSub {
+func NewManager(config ManagerConfig) *Manager {
 	config.ensure()
 
 	var newCtx, canceler = context.WithCancel(config.Ctx)
-	var manager = pubsub.NewTransportManager(newCtx, config.Transport, config.Logger)
-	var pub = PubSub{
-		config:   config,
-		ctx:      newCtx,
-		canceler: canceler,
-		manager:  manager,
+	var manager = NewTransportManager(newCtx, config.Transport, config.Logger)
+	return &Manager{
+		config:           config,
+		ctx:              newCtx,
+		canceler:         canceler,
+		transportManager: manager,
 	}
-
-	pub.hub = NewGorillaHub(HubConfig{
-		Ctx:           newCtx,
-		Logger:        config.Logger,
-		Handler:       pub.handleSocketMessage,
-		OnClosure:     pub.manageSocketClosed,
-		OnOpen:        pub.manageSocketOpened,
-		ConfigHandler: config.ConfigHandler,
-	})
-	return &pub
 }
 
-func (gp *PubSub) Wait() {
-	gp.manager.Wait()
-	gp.hub.Wait()
+// ServiceConfig provides attributes that a transport
+// can use to deliver sockets to a Manager.
+//
+// This intends allow other transport protocols (think http, tcp) take provided
+// config and route their messages through the
+// transportManager.
+type ServiceConfig struct {
+	Ctx       context.Context
+	Handler   sabuhp.MessageHandler
+	OnClosure SocketNotification
+	OnOpen    SocketNotification
 }
 
-func (gp *PubSub) Hub() *GorillaHub {
-	return gp.hub
+func (gp *Manager) Config() ServiceConfig {
+	return ServiceConfig{
+		Ctx:       gp.ctx,
+		Handler:   gp.HandleSocketMessage,
+		OnClosure: gp.ManageSocketClosed,
+		OnOpen:    gp.ManageSocketOpened,
+	}
 }
 
-func (gp *PubSub) Stop() {
+func (gp *Manager) Wait() {
+	gp.transportManager.Wait()
+}
+
+func (gp *Manager) Ctx() context.Context {
+	return gp.ctx
+}
+
+func (gp *Manager) Stop() {
 	gp.canceler()
-	gp.hub.Wait()
-	gp.manager.Wait()
+	gp.transportManager.Wait()
 }
 
-func (gp *PubSub) Start() {
-	gp.hub.Start()
+func (gp *Manager) Conn() sabuhp.Conn {
+	return gp.transportManager.Conn()
 }
 
 // Listen creates a local subscription for listening to an underline message
 // for a giving topic.
-func (gp *PubSub) Listen(topic string, handler supabaiza.TransportResponse) supabaiza.Channel {
-	return gp.manager.Listen(topic, handler)
+func (gp *Manager) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
+	return gp.transportManager.Listen(topic, handler)
 }
 
 // SendToOne selects a random recipient which will receive the message to be delivered
 // for processing.
-func (gp *PubSub) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
-	if sendErr := gp.manager.SendToOne(data, timeout); sendErr != nil {
+func (gp *Manager) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
+	if sendErr := gp.transportManager.SendToOne(data, timeout); sendErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to send message on transport", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", sendErr.Error())
@@ -120,8 +131,8 @@ func (gp *PubSub) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
 }
 
 // SendToAll delivers to all listeners the provided message within specific timeout.
-func (gp *PubSub) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
-	if sendErr := gp.manager.SendToAll(data, timeout); sendErr != nil {
+func (gp *Manager) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
+	if sendErr := gp.transportManager.SendToAll(data, timeout); sendErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to send message on transport", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", sendErr.Error())
@@ -136,28 +147,32 @@ func (gp *PubSub) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
 	return nil
 }
 
-func (gp *PubSub) manageSocketOpened(socket *GorillaSocket) {
+func (gp *Manager) ManageSocketOpened(socket sabuhp.Socket) {
 	if gp.config.OnOpen != nil {
 		gp.config.OnOpen(socket)
 	}
 }
 
-func (gp *PubSub) manageSocketClosed(socket *GorillaSocket) {
-	gp.manager.UnlistenAllWithId(socket.ID())
+func (gp *Manager) ManageSocketClosed(socket sabuhp.Socket) {
+	gp.transportManager.UnlistenAllWithId(socket.ID())
 
 	if gp.config.OnClosure != nil {
 		gp.config.OnClosure(socket)
 	}
 }
 
-func (gp *PubSub) handleSocketMessage(message []byte, socket *GorillaSocket) error {
+func (gp *Manager) HandleSocketCatchup(lastId nxid.ID, socket sabuhp.Socket) error {
+	return nil
+}
+
+func (gp *Manager) HandleSocketMessage(message []byte, socket sabuhp.Socket) error {
 	var msg, msgErr = gp.config.Codec.Decode(message)
 	if msgErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to decoded message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", msgErr.Error())
 			event.String("message", string(message))
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return msgErr
@@ -165,34 +180,34 @@ func (gp *PubSub) handleSocketMessage(message []byte, socket *GorillaSocket) err
 
 	var topicString = string(msg.Payload)
 	switch msg.Topic {
-	case SUBSCRIBE:
+	case sabuhp.SUBSCRIBE:
 		gp.config.Logger.Log(njson.MJSON("handling subscription message", func(event npkg.Encoder) {
 			event.String("topic", msg.Topic)
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 
-		gp.socketListenToTopic(topicString, socket)
-	case UNSUBSCRIBE:
+		gp.SocketListenToTopic(topicString, socket)
+	case sabuhp.UNSUBSCRIBE:
 		gp.config.Logger.Log(njson.MJSON("handling unsubscription message", func(event npkg.Encoder) {
 			event.String("topic", msg.Topic)
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID.String())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 
-		gp.manager.UnlistenWithId(topicString, socket.ID())
+		gp.transportManager.UnlistenWithId(topicString, socket.ID())
 	default:
-		if sendErr := gp.manager.SendToAll(msg, gp.config.MaxWaitToSend); sendErr != nil {
+		if sendErr := gp.transportManager.SendToAll(msg, gp.config.MaxWaitToSend); sendErr != nil {
 			gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 				event.String("hub_id", gp.config.ID.String())
 				event.String("error", sendErr.Error())
-				event.String("socket_id", socket.id.String())
+				event.String("socket_id", socket.ID().String())
 				event.Object("socket_stat", socket.Stat())
 			}))
 		}
@@ -200,42 +215,42 @@ func (gp *PubSub) handleSocketMessage(message []byte, socket *GorillaSocket) err
 	return nil
 }
 
-func (gp *PubSub) socketListenToTopic(topic string, socket *GorillaSocket) {
-	_ = gp.manager.ListenWithId(
+func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
+	_ = gp.transportManager.ListenWithId(
 		socket.ID(),
 		topic,
-		func(message *sabuhp.Message, transport supabaiza.Transport) supabaiza.MessageErr {
+		sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 			var msgBytes, msgBytesErr = gp.config.Codec.Encode(message)
 			if msgBytesErr != nil {
 				gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 					event.String("hub_id", gp.config.ID.String())
 					event.String("error", msgBytesErr.Error())
-					event.String("socket_id", socket.id.String())
+					event.String("socket_id", socket.ID().String())
 					event.Object("socket_stat", socket.Stat())
 				}))
-				return supabaiza.WrapErr(msgBytesErr, false)
+				return sabuhp.WrapErr(msgBytesErr, false)
 			}
 
 			if sendErr := socket.Send(msgBytes, gp.config.MaxWaitToSend); sendErr != nil {
 				gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 					event.String("hub_id", gp.config.ID.String())
 					event.String("error", sendErr.Error())
-					event.String("socket_id", socket.id.String())
+					event.String("socket_id", socket.ID().String())
 					event.Object("socket_stat", socket.Stat())
 				}))
-				return supabaiza.WrapErr(sendErr, false)
+				return sabuhp.WrapErr(sendErr, false)
 			}
 
 			return nil
-		})
+		}))
 
-	var okMessage = OK(gp.config.ID.String(), socket.socket.LocalAddr().String())
+	var okMessage = sabuhp.OK(gp.config.ID.String(), socket.LocalAddr().String())
 	var okBytes, okBytesErr = gp.config.Codec.Encode(okMessage)
 	if okBytesErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", okBytesErr.Error())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
@@ -245,7 +260,7 @@ func (gp *PubSub) socketListenToTopic(topic string, socket *GorillaSocket) {
 		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", sendErr.Error())
-			event.String("socket_id", socket.id.String())
+			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
 		return
@@ -254,7 +269,7 @@ func (gp *PubSub) socketListenToTopic(topic string, socket *GorillaSocket) {
 	gp.config.Logger.Log(njson.MJSON("added socket as subscriber to topic", func(event npkg.Encoder) {
 		event.String("topic", topic)
 		event.String("hub_id", gp.config.ID.String())
-		event.String("socket_id", socket.id.String())
+		event.String("socket_id", socket.ID().String())
 		event.Object("socket_stat", socket.Stat())
 	}))
 }

@@ -8,39 +8,44 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/influx6/sabuhp/utils"
-
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 
 	"github.com/Ewe-Studios/websocket"
+
+	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/pubsub"
+
+	"github.com/influx6/sabuhp/utils"
 )
 
 const (
 	// default buffer size for socket message channel.
-	defaultBufferForMessages = 100
+	DefaultBufferForMessages = 100
 
-	// defaultReadWait defines the default Wait time for writing.
-	defaultWriteWait = time.Second * 60
+	// DefaultReconnectionWaitCheck defines the default Wait time for checking reconnection.
+	DefaultReconnectionWaitCheck = time.Millisecond * 200
 
-	// defaultReadWait defines the default Wait time for reading.
-	defaultReadWait = time.Second * 60
+	// DefaultReadWait defines the default Wait time for writing.
+	DefaultWriteWait = time.Second * 60
 
-	// defaultPingInterval is the default ping interval for a redelivery
+	// DefaultReadWait defines the default Wait time for reading.
+	DefaultReadWait = time.Second * 60
+
+	// DefaultPingInterval is the default ping interval for a redelivery
 	// of a ping message.
-	defaultPingInterval = (defaultReadWait * 9) / 10
+	DefaultPingInterval = (DefaultReadWait * 9) / 10
 
-	// defaultMessageType defines the default message type expected.
-	defaultMessageType = websocket.BinaryMessage
+	// DefaultMessageType defines the default message type expected.
+	DefaultMessageType = websocket.BinaryMessage
 
 	// Default maximum message size allowed if user does not set value
 	// in SocketConfig.
-	defaultMaxMessageSize = 4096
+	DefaultMaxMessageSize = 4096
 )
 
 type CustomHeader func(r *http.Request) http.Header
@@ -107,14 +112,12 @@ func HttpUpgrader(
 
 type ConfigCreator func(config SocketConfig) SocketConfig
 
-type SocketNotification func(socket *GorillaSocket)
-
 type HubConfig struct {
 	Ctx           context.Context
 	Logger        sabuhp.Logger
-	Handler       MessageHandler
-	OnClosure     SocketNotification
-	OnOpen        SocketNotification
+	Handler       sabuhp.MessageHandler
+	OnClosure     pubsub.SocketNotification
+	OnOpen        pubsub.SocketNotification
 	ConfigHandler ConfigCreator
 }
 
@@ -127,6 +130,23 @@ type GorillaHub struct {
 	starter  *sync.Once
 	ender    *sync.Once
 	sockets  map[nxid.ID]*GorillaSocket
+}
+
+// ManagedGorillaHub returns a new instance of a gorilla hub which uses a pubsub.Manager
+// to manage communication across various websocket connections.
+//
+// It allows the manager to delegate connections management to a suitable type (i.e GorillaHub)
+// and in the future other protocols/transport while the manager uses the central message bus transport
+// to communicate to other services and back to the connections.
+func ManagedGorillaHub(logger sabuhp.Logger, manager *pubsub.Manager, optionalConfigCreator ConfigCreator) *GorillaHub {
+	return NewGorillaHub(HubConfig{
+		Logger:        logger,
+		Ctx:           manager.Ctx(),
+		Handler:       manager.HandleSocketMessage,
+		OnClosure:     manager.ManageSocketClosed,
+		OnOpen:        manager.ManageSocketOpened,
+		ConfigHandler: optionalConfigCreator,
+	})
 }
 
 func NewGorillaHub(config HubConfig) *GorillaHub {
@@ -260,10 +280,10 @@ func (gh *GorillaHub) HandleSocket(socket *websocket.Conn) SocketHandler {
 	}
 }
 
-func (gh *GorillaHub) Stats() ([]SocketStat, error) {
-	var statChan = make(chan []SocketStat, 1)
+func (gh *GorillaHub) Stats() ([]sabuhp.SocketStat, error) {
+	var statChan = make(chan []sabuhp.SocketStat, 1)
 	var doAction = func() {
-		var stats []SocketStat
+		var stats []sabuhp.SocketStat
 		for _, socket := range gh.sockets {
 			stats = append(stats, socket.Stat())
 		}
@@ -301,82 +321,175 @@ doLoop:
 	gh.sockets = map[nxid.ID]*GorillaSocket{}
 }
 
-// MessageHandler defines the function contract a GorillaSocket uses
-// to handle a message.
-//
-// Be aware that returning an error from the handler to the Gorilla Socket
-// will cause the immediate closure of that socket and ending communication
-// with the client and the error will be logged. So unless your intention is to
-// end the connection, handle it yourself.
-type MessageHandler func(b []byte, from *GorillaSocket) error
+type Endpoint interface {
+	Dial(ctx context.Context) (*websocket.Conn, *http.Response, error)
+}
 
 type SocketConfig struct {
-	Buffer           int
-	MessageType      int
-	MaxMessageSize   int
-	WriteMessageWait time.Duration
-	ReadMessageWait  time.Duration
-	PingInterval     time.Duration // should be lesser than ReadMessageWait duration
-	Ctx              context.Context
-	Logger           sabuhp.Logger
-	Conn             *websocket.Conn
-	Handler          MessageHandler
+	Buffer                int
+	MessageType           int
+	MaxMessageSize        int
+	WriteMessageWait      time.Duration
+	ReadMessageWait       time.Duration
+	ReconnectionCheckWait time.Duration
+	PingInterval          time.Duration // should be lesser than ReadMessageWait duration
+	Ctx                   context.Context
+	Logger                sabuhp.Logger
+	Conn                  *websocket.Conn
+
+	// Client related fields
+	Res      *http.Response // optional
+	MaxRetry int
+	RetryFn  sabuhp.RetryFunc
+	Endpoint Endpoint
+
+	// MessageHandler defines the function contract a GorillaSocket uses
+	// to handle a message.
+	//
+	// Be aware that returning an error from the handler to the Gorilla Socket
+	// will cause the immediate closure of that socket and ending communication
+	// with the server. So unless your intention is to
+	// end the connection, handle the error yourself.
+	Handler sabuhp.MessageHandler
+}
+
+func (s *SocketConfig) clientConnect(ctx context.Context) error {
+	var lastDuration time.Duration
+	var retryCount int
+	for {
+		lastDuration = s.RetryFn(lastDuration)
+		<-time.After(lastDuration)
+
+		var conn, res, err = s.Endpoint.Dial(ctx)
+		if err != nil && retryCount < s.MaxRetry {
+			if res != nil && res.Body != nil {
+				_ = res.Body.Close()
+			}
+
+			s.Logger.Log(njson.MJSON("failed connection attempt", func(event npkg.Encoder) {
+				event.String("error", nerror.WrapOnly(err).Error())
+			}))
+
+			retryCount++
+			continue
+		}
+		if err != nil && retryCount >= s.MaxRetry {
+			if res != nil && res.Body != nil {
+				_ = res.Body.Close()
+			}
+			s.Logger.Log(njson.MJSON("failed all connection attempts, ending...", func(event npkg.Encoder) {
+				event.String("error", nerror.WrapOnly(err).Error())
+			}))
+			return nerror.WrapOnly(err)
+		}
+
+		s.Conn = conn
+		s.Res = res
+		return nil
+	}
 }
 
 func (s *SocketConfig) ensure() {
-	if s.Conn == nil {
-		panic("SocketConfig.Conn must be provided")
+	if s.Conn == nil && s.Endpoint == nil {
+		panic("SocketConfig.Conn or SocketConfig.Endpoint must be provided")
 	}
 	if s.Logger == nil {
 		panic("SocketConfig.Logger must be provided")
 	}
 	if s.ReadMessageWait <= 0 {
-		s.ReadMessageWait = defaultReadWait
+		s.ReadMessageWait = DefaultReadWait
+	}
+	if s.ReconnectionCheckWait <= 0 {
+		s.ReconnectionCheckWait = DefaultReconnectionWaitCheck
 	}
 	if s.WriteMessageWait <= 0 {
-		s.WriteMessageWait = defaultWriteWait
+		s.WriteMessageWait = DefaultWriteWait
 	}
 	if s.MaxMessageSize <= 0 {
-		s.MaxMessageSize = defaultMaxMessageSize
+		s.MaxMessageSize = DefaultMaxMessageSize
 	}
 	if s.MessageType <= 0 {
-		s.MessageType = defaultMessageType
+		s.MessageType = DefaultMessageType
 	}
 	if s.PingInterval <= 0 {
-		s.PingInterval = defaultPingInterval
+		s.PingInterval = DefaultPingInterval
 	}
 	if s.Buffer <= 0 {
-		s.Buffer = defaultBufferForMessages
+		s.Buffer = DefaultBufferForMessages
 	}
 }
 
+var _ sabuhp.Socket = (*GorillaSocket)(nil)
+
 type GorillaSocket struct {
 	id       nxid.ID
-	config   SocketConfig
+	config   *SocketConfig
+	isClient bool
 	canceler context.CancelFunc
 	ctx      context.Context
-	socket   *websocket.Conn
+	pending  chan []byte
 	send     chan []byte
 	deliver  chan []byte
 	waiter   sync.WaitGroup
 	starter  sync.Once
 	ender    sync.Once
+
+	rl           sync.RWMutex
+	reconnecting bool
+	sl           sync.RWMutex
+	socket       *websocket.Conn
+
 	received int64
 	sent     int64
 	handled  int64
 }
 
+func GorillaClient(config SocketConfig) (*GorillaSocket, error) {
+	config.ensure()
+	if config.Endpoint == nil {
+		return nil, nerror.New("SocketConfig.Endpoint is required")
+	}
+	if config.RetryFn == nil {
+		return nil, nerror.New("SocketConfig.RetryFn is required")
+	}
+
+	var localCtx, canceler = context.WithCancel(config.Ctx)
+	if connectErr := config.clientConnect(localCtx); connectErr != nil {
+		canceler()
+		return nil, nerror.WrapOnly(connectErr)
+	}
+
+	var wg GorillaSocket
+	wg.isClient = true
+	wg.socket = config.Conn
+	wg.config = &config
+	wg.id = nxid.New()
+	wg.pending = make(chan []byte, config.Buffer)
+	wg.send = make(chan []byte, config.Buffer)
+	wg.deliver = make(chan []byte, config.Buffer)
+	wg.canceler = canceler
+	wg.ctx = localCtx
+	return &wg, nil
+}
+
 func NewGorillaSocket(config SocketConfig) *GorillaSocket {
+	config.ensure()
 	var localCtx, canceler = context.WithCancel(config.Ctx)
 	var wg GorillaSocket
 	wg.socket = config.Conn
-	wg.config = config
+	wg.config = &config
 	wg.id = nxid.New()
 	wg.send = make(chan []byte, config.Buffer)
 	wg.deliver = make(chan []byte, config.Buffer)
 	wg.canceler = canceler
 	wg.ctx = localCtx
 	return &wg
+}
+
+func (g *GorillaSocket) Conn() *websocket.Conn {
+	g.sl.RLock()
+	defer g.sl.RUnlock()
+	return g.socket
 }
 
 func (g *GorillaSocket) ID() nxid.ID {
@@ -406,28 +519,20 @@ func (g *GorillaSocket) Send(message []byte, timeout time.Duration) error {
 	}
 }
 
-type SocketStat struct {
-	Addr       net.Addr
-	RemoteAddr net.Addr
-	Id         string
-	Sent       int64
-	Received   int64
-	Handled    int64
+func (g *GorillaSocket) LocalAddr() net.Addr {
+	g.sl.RLock()
+	defer g.sl.RUnlock()
+	return g.socket.LocalAddr()
 }
 
-func (g SocketStat) EncodeObject(encoder npkg.ObjectEncoder) {
-	encoder.String("id", g.Id)
-	encoder.Int64("total_sent", g.Sent)
-	encoder.Int64("total_handled", g.Handled)
-	encoder.Int64("total_received", g.Received)
-	encoder.String("addr", g.Addr.String())
-	encoder.String("addr_network", g.Addr.Network())
-	encoder.String("remote_addr", g.RemoteAddr.String())
-	encoder.String("remote_addr_network", g.RemoteAddr.Network())
+func (g *GorillaSocket) RemoteAddr() net.Addr {
+	g.sl.RLock()
+	defer g.sl.RUnlock()
+	return g.socket.RemoteAddr()
 }
 
-func (g *GorillaSocket) Stat() SocketStat {
-	var stat SocketStat
+func (g *GorillaSocket) Stat() sabuhp.SocketStat {
+	var stat sabuhp.SocketStat
 	stat.Id = g.id.String()
 	stat.Addr = g.socket.LocalAddr()
 	stat.RemoteAddr = g.socket.RemoteAddr()
@@ -435,14 +540,6 @@ func (g *GorillaSocket) Stat() SocketStat {
 	stat.Handled = atomic.LoadInt64(&g.handled)
 	stat.Received = atomic.LoadInt64(&g.received)
 	return stat
-}
-
-// DeliverChannel gives you access to the deliver channel.
-//
-// Be careful to only use once this socket has being closed
-// it is internally managed by the socket till closure.
-func (g *GorillaSocket) DeliverChannel() chan []byte {
-	return g.deliver
 }
 
 // SendChannel gives you access to the send channel.
@@ -469,8 +566,11 @@ func (g *GorillaSocket) Stop() {
 
 func (g *GorillaSocket) manage() {
 	defer func() {
+		g.sl.RLock()
+		defer g.sl.RUnlock()
 		if closingErr := g.socket.Close(); closingErr != nil {
 			g.config.Logger.Log(njson.MJSON("error handling during connection closure", func(event npkg.Encoder) {
+				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -486,6 +586,16 @@ func (g *GorillaSocket) manage() {
 	go g.manageWrites()
 	go g.manageDelivery()
 	g.manageReads()
+
+	g.config.Logger.Log(njson.MJSON("closed all go-routines", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+		event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+		event.String("socket_local_addr", g.socket.LocalAddr().String())
+		event.String("socket_local_network", g.socket.LocalAddr().Network())
+		event.String("socket_sub_protocols", g.socket.Subprotocol())
+	}))
 }
 
 func (g *GorillaSocket) manageDelivery() {
@@ -493,11 +603,21 @@ loopCall:
 	for {
 		select {
 		case <-g.config.Ctx.Done():
+			g.config.Logger.Log(njson.MJSON("closing delivery loop", func(event npkg.Encoder) {
+				event.Bool("is_client", g.isClient)
+				event.String("socket_id", g.id.String())
+				event.String("socket_network", g.socket.RemoteAddr().Network())
+				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+				event.String("socket_local_addr", g.socket.LocalAddr().String())
+				event.String("socket_local_network", g.socket.LocalAddr().Network())
+				event.String("socket_sub_protocols", g.socket.Subprotocol())
+			}))
 			break loopCall
 		case message := <-g.deliver:
 			atomic.AddInt64(&g.handled, 1)
 			if handleErr := g.config.Handler(message, g); handleErr != nil {
 				g.config.Logger.Log(njson.MJSON("error handling message from handler", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -527,10 +647,16 @@ func (g *GorillaSocket) manageReads() {
 	})
 
 	for {
+		if g.isReconnecting() {
+			<-time.After(g.config.ReconnectionCheckWait)
+			continue
+		}
+
 		var _, message, readErr = g.socket.ReadMessage()
 		atomic.AddInt64(&g.received, 1)
 		if readErr != nil {
 			g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -547,14 +673,120 @@ func (g *GorillaSocket) manageReads() {
 					event.Bool("client_closed_abnormally", true)
 				}
 			}))
+
+			if g.attemptReconnection() {
+				continue
+			}
 			break
 		}
 
 		g.deliver <- message
 	}
 
+	g.config.Logger.Log(njson.MJSON("closing read loop", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+		event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+		event.String("socket_local_addr", g.socket.LocalAddr().String())
+		event.String("socket_local_network", g.socket.LocalAddr().Network())
+		event.String("socket_sub_protocols", g.socket.Subprotocol())
+	}))
+
 	// if we ever get here, then end socket.
 	g.canceler()
+}
+
+func (g *GorillaSocket) isReconnecting() bool {
+	g.rl.RLock()
+	if g.reconnecting {
+		g.rl.RUnlock()
+		return true
+	}
+	g.rl.RUnlock()
+	return false
+}
+
+func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
+	if !g.isClient {
+		continueLoop = false
+		return
+	}
+
+	if g.isReconnecting() {
+		continueLoop = true
+		return
+	}
+
+	g.config.Logger.Log(njson.MJSON("check ctx before reconnection", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+	}))
+
+	select {
+	case <-g.ctx.Done():
+		continueLoop = false
+		return
+	default:
+		// do nothing
+	}
+
+	g.rl.Lock()
+	g.reconnecting = true
+	g.rl.Unlock()
+
+	// attempt reconnection
+	g.sl.RLock()
+	_ = g.socket.Close()
+	g.sl.RUnlock()
+
+	g.config.Logger.Log(njson.MJSON("attempting connection re-establishment", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+	}))
+
+	var connErr = g.config.clientConnect(g.ctx)
+	if connErr != nil {
+		g.config.Logger.Log(njson.MJSON("failed connection re-establishment", func(event npkg.Encoder) {
+			event.Bool("is_client", g.isClient)
+			event.String("socket_id", g.id.String())
+			event.String("socket_network", g.socket.RemoteAddr().Network())
+			event.String("error", nerror.WrapOnly(connErr).Error())
+		}))
+
+		continueLoop = false
+
+		g.rl.Lock()
+		g.reconnecting = false
+		g.rl.Unlock()
+
+		return
+	}
+
+	g.config.Logger.Log(njson.MJSON("received new connection", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+	}))
+
+	g.sl.Lock()
+	g.socket = g.config.Conn
+	g.sl.Unlock()
+
+	g.rl.Lock()
+	g.reconnecting = false
+	g.rl.Unlock()
+
+	continueLoop = true
+
+	g.config.Logger.Log(njson.MJSON("connection re-established", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+	}))
+	return
 }
 
 func (g *GorillaSocket) manageWrites() {
@@ -566,10 +798,16 @@ func (g *GorillaSocket) manageWrites() {
 
 runloop:
 	for {
+		if g.isReconnecting() {
+			<-time.After(g.config.ReconnectionCheckWait)
+			continue runloop
+		}
+
 		select {
 		case <-pingTicker.C:
 			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -578,9 +816,11 @@ runloop:
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
 					event.String("error", nerror.WrapOnly(setTimeErr).Error())
 				}))
+				continue runloop
 			}
 			if writeErr := g.socket.WriteMessage(websocket.PingMessage, nil); writeErr != nil {
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -589,12 +829,34 @@ runloop:
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
 					event.String("error", nerror.WrapOnly(writeErr).Error())
 				}))
+
+				// attempt reconnection
+				if g.attemptReconnection() {
+					continue runloop
+				}
+
 				break runloop
 			}
-		case message := <-g.send:
+		case message := <-g.pending:
+			// this case should rearly happen, only when a send succeeded
+			// into the goroutine but the client disconnecting and was
+			// about to reconnect.
+
+			g.config.Logger.Log(njson.MJSON("received message on pending", func(event npkg.Encoder) {
+				event.Bool("is_client", g.isClient)
+				event.String("socket_id", g.id.String())
+				event.String("message", string(message))
+				event.String("socket_network", g.socket.RemoteAddr().Network())
+				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+				event.String("socket_local_addr", g.socket.LocalAddr().String())
+				event.String("socket_local_network", g.socket.LocalAddr().Network())
+				event.String("socket_sub_protocols", g.socket.Subprotocol())
+			}))
+
 			atomic.AddInt64(&g.sent, 1)
 			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -608,6 +870,7 @@ runloop:
 			var writer, writerErr = g.socket.NextWriter(g.config.MessageType)
 			if writerErr != nil {
 				g.config.Logger.Log(njson.MJSON("error creating new writer on socket", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -619,6 +882,104 @@ runloop:
 				}))
 
 				_ = writer.Close()
+
+				break runloop
+			}
+
+			var _, sendErr = writer.Write(message)
+			if sendErr != nil {
+				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
+					event.String("socket_id", g.id.String())
+					event.String("message", string(message))
+					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.String("socket_local_network", g.socket.LocalAddr().Network())
+					event.String("socket_sub_protocols", g.socket.Subprotocol())
+					event.String("error", nerror.WrapOnly(writerErr).Error())
+				}))
+
+				_ = writer.Close()
+				break runloop
+			}
+
+			if closingErr := writer.Close(); closingErr != nil {
+				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
+					event.String("socket_id", g.id.String())
+					event.String("message", string(message))
+					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.String("socket_local_network", g.socket.LocalAddr().Network())
+					event.String("socket_sub_protocols", g.socket.Subprotocol())
+					event.String("error", nerror.WrapOnly(writerErr).Error())
+				}))
+
+				break runloop
+			}
+		case message := <-g.send:
+			if g.isReconnecting() {
+				g.pending <- message
+				g.config.Logger.Log(njson.MJSON("pushed into pending", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
+					event.String("socket_id", g.id.String())
+					event.String("message", string(message))
+					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.String("socket_local_network", g.socket.LocalAddr().Network())
+					event.String("socket_sub_protocols", g.socket.Subprotocol())
+				}))
+				continue runloop
+			}
+
+			g.config.Logger.Log(njson.MJSON("received write", func(event npkg.Encoder) {
+				event.Bool("is_client", g.isClient)
+				event.String("socket_id", g.id.String())
+				event.String("message", string(message))
+				event.String("socket_network", g.socket.RemoteAddr().Network())
+				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+				event.String("socket_local_addr", g.socket.LocalAddr().String())
+				event.String("socket_local_network", g.socket.LocalAddr().Network())
+				event.String("socket_sub_protocols", g.socket.Subprotocol())
+			}))
+
+			atomic.AddInt64(&g.sent, 1)
+			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
+				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
+					event.String("socket_id", g.id.String())
+					event.String("message", string(message))
+					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.String("socket_local_network", g.socket.LocalAddr().Network())
+					event.String("socket_sub_protocols", g.socket.Subprotocol())
+					event.String("error", nerror.WrapOnly(setTimeErr).Error())
+				}))
+			}
+			var writer, writerErr = g.socket.NextWriter(g.config.MessageType)
+			if writerErr != nil {
+				g.config.Logger.Log(njson.MJSON("error creating new writer on socket", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
+					event.String("socket_id", g.id.String())
+					event.String("message", string(message))
+					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.String("socket_local_network", g.socket.LocalAddr().Network())
+					event.String("socket_sub_protocols", g.socket.Subprotocol())
+					event.String("error", nerror.WrapOnly(writerErr).Error())
+				}))
+
+				_ = writer.Close()
+
+				// attempt reconnection
+				if g.attemptReconnection() {
+					continue runloop
+				}
 				break runloop
 			}
 
@@ -628,6 +989,7 @@ runloop:
 			var _, sendErr = writer.Write(message)
 			if sendErr != nil {
 				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -639,6 +1001,11 @@ runloop:
 				}))
 
 				_ = writer.Close()
+
+				// attempt reconnection
+				if g.attemptReconnection() {
+					continue runloop
+				}
 				break runloop
 			}
 
@@ -647,6 +1014,7 @@ runloop:
 				var _, sendErr = writer.Write(pendingMsg)
 				if sendErr != nil {
 					g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+						event.Bool("is_client", g.isClient)
 						event.String("socket_id", g.id.String())
 						event.String("message", string(pendingMsg))
 						event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -658,12 +1026,18 @@ runloop:
 					}))
 
 					_ = writer.Close()
+
+					// attempt reconnection
+					if g.attemptReconnection() {
+						continue runloop
+					}
 					break runloop
 				}
 			}
 
 			if closingErr := writer.Close(); closingErr != nil {
 				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -673,11 +1047,17 @@ runloop:
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
 					event.String("error", nerror.WrapOnly(writerErr).Error())
 				}))
+
+				// attempt reconnection
+				if g.attemptReconnection() {
+					continue runloop
+				}
 				break runloop
 			}
 		case <-g.ctx.Done():
 			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -689,6 +1069,7 @@ runloop:
 			}
 			if writeErr := g.socket.WriteMessage(websocket.CloseMessage, nil); writeErr != nil {
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -698,9 +1079,20 @@ runloop:
 					event.String("error", nerror.WrapOnly(writeErr).Error())
 				}))
 			}
+
 			break runloop
 		}
 	}
+
+	g.config.Logger.Log(njson.MJSON("closing write loop", func(event npkg.Encoder) {
+		event.Bool("is_client", g.isClient)
+		event.String("socket_id", g.id.String())
+		event.String("socket_network", g.socket.RemoteAddr().Network())
+		event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+		event.String("socket_local_addr", g.socket.LocalAddr().String())
+		event.String("socket_local_network", g.socket.LocalAddr().Network())
+		event.String("socket_sub_protocols", g.socket.Subprotocol())
+	}))
 
 	// if we ever get here, then end socket.
 	g.canceler()
