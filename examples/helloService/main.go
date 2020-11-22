@@ -91,6 +91,7 @@ func main() {
 	})
 	if redisTransportErr != nil {
 		log.Fatal(redisTransportErr.Error())
+		return
 	}
 
 	// wrap transport with manager
@@ -133,10 +134,13 @@ func main() {
 		transportManager,
 		mainLogger,
 	)
+	workerHub.Start()
 
 	// transports protocols
 	var wsServer = gorillapub.ManagedGorillaHub(mainLogger, transportManager, nil)
 	var wsHandler = gorillapub.UpgraderHandler(mainLogger, wsServer, upgrader, nil)
+	wsServer.Start()
+
 	var sseServer = ssepub.ManagedSSEServer(masterCtx, mainLogger, transportManager, nil)
 
 	// router
@@ -156,12 +160,15 @@ func main() {
 	// http server
 	var httpServer = nhttp.NewServer(router, 5*time.Second)
 
-	wsServer.Start()
 	if startServerErr := httpServer.Listen(masterCtx, ":7800"); startServerErr != nil {
 		log.Fatal(startServerErr)
+		return
 	}
 
-	workerHub.Start()
+	logStack.New().
+		Info().
+		Message("starting service").
+		End()
 
 	workerHub.Wait()
 	wsServer.Wait()
