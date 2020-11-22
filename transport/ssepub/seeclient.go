@@ -179,8 +179,19 @@ func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
 		header.Set(LastEventIdListHeader, sc.lastId.String())
 	}
 
+	var ctx = sc.ctx
+	var canceler context.CancelFunc
+	if timeout > 0 {
+		ctx, canceler = context.WithTimeout(sc.ctx, timeout)
+	} else {
+		canceler = func() {
+		}
+	}
+
+	defer canceler()
+
 	var req, response, err = utils.DoRequest(
-		sc.ctx,
+		ctx,
 		sc.client,
 		sc.request.Method,
 		sc.request.URL.String(),
