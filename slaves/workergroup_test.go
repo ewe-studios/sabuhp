@@ -36,13 +36,13 @@ func TestNewWorkGroup(t *testing.T) {
 	count.Add(10)
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
 			require.NotNil(t, testName, to)
 			count.Done()
-		},
+		}),
 		3,
 		3,
 	)
@@ -75,7 +75,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -84,7 +84,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 			// create 1 second delay.
 			<-time.After(500 * time.Millisecond)
 			count.Done()
-		},
+		}),
 		1,
 		3,
 	)
@@ -124,9 +124,9 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			panic("Killed to restart")
-		},
+		}),
 		1,
 		3,
 	)
@@ -175,9 +175,9 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			panic("Killed to restart")
-		},
+		}),
 		1,
 		3,
 	)

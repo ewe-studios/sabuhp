@@ -65,7 +65,7 @@ func (wc *SlaveWorkerRequest) ensure() {
 // request the creation of a worker group for a giving action.
 type WorkerRequest struct {
 	// Err provides a means of response detailing possible error
-	// that occurred during the processing of this creating the worker.
+	// that occurred during the processing of creating this worker.
 	Err chan error
 
 	// ActionName represent the action name for this
