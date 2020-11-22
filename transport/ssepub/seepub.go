@@ -483,6 +483,7 @@ doLoop:
 		case msg := <-se.rcvMsgs:
 			atomic.AddInt64(&se.received, 1)
 			njson.Log(se.logger).New().
+				Info().
 				Message("received new data from client").
 				Bytes("data", msg).
 				End()

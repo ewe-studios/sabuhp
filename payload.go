@@ -262,10 +262,3 @@ func (m *Message) Copy() *Message {
 
 	return &clone
 }
-
-// Codec embodies implementation for the serialization of
-// a message into bytes and vice-versa.
-type Codec interface {
-	Encode(msg *Message) ([]byte, error)
-	Decode(b []byte) (*Message, error)
-}

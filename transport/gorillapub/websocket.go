@@ -335,7 +335,12 @@ type SocketConfig struct {
 	PingInterval          time.Duration // should be lesser than ReadMessageWait duration
 	Ctx                   context.Context
 	Logger                sabuhp.Logger
-	Conn                  *websocket.Conn
+
+	// You can supply the websocket.Conn aif you wish to
+	// use an existing connection, the endpoint becomes
+	// non useful here, and you should set ShouldNotTry to true.
+	Conn           *websocket.Conn
+	ShouldNotRetry bool
 
 	// Client related fields
 	Res      *http.Response // optional
@@ -445,17 +450,19 @@ type GorillaSocket struct {
 
 func GorillaClient(config SocketConfig) (*GorillaSocket, error) {
 	config.ensure()
-	if config.Endpoint == nil {
-		return nil, nerror.New("SocketConfig.Endpoint is required")
+	if config.Endpoint == nil && config.Conn == nil {
+		return nil, nerror.New("SocketConfig.Endpoint or SocketConfig.Conn is required")
 	}
 	if config.RetryFn == nil {
 		return nil, nerror.New("SocketConfig.RetryFn is required")
 	}
 
 	var localCtx, canceler = context.WithCancel(config.Ctx)
-	if connectErr := config.clientConnect(localCtx); connectErr != nil {
-		canceler()
-		return nil, nerror.WrapOnly(connectErr)
+	if config.Conn == nil {
+		if connectErr := config.clientConnect(localCtx); connectErr != nil {
+			canceler()
+			return nil, nerror.WrapOnly(connectErr)
+		}
 	}
 
 	var wg GorillaSocket
@@ -708,6 +715,11 @@ func (g *GorillaSocket) isReconnecting() bool {
 
 func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
 	if !g.isClient {
+		continueLoop = false
+		return
+	}
+
+	if g.config.ShouldNotRetry {
 		continueLoop = false
 		return
 	}
