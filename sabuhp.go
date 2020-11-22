@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/influx6/npkg"
+
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg/njson"
@@ -65,6 +67,12 @@ func (m messageErr) ShouldAck() bool {
 type Conn interface{}
 
 type Params map[string]string
+
+func (h Params) EncodeObject(encoder npkg.ObjectEncoder) {
+	for key, value := range h {
+		encoder.String(key, value)
+	}
+}
 
 func (h Params) Get(k string) string {
 	return h[k]
@@ -173,9 +181,12 @@ func Pre(middleware ...Wrapper) Wrappers {
 	return Wrappers(middleware)
 }
 
-// Transport defines what an underline transport system provides.
+// Transport defines what an underline message transport implementation
+// like a message bus or rpc connection that can deliver according to
+// required semantics of one-to-one and one-to-many.
 type Transport interface {
 	Conn() Conn
+
 	Listen(topic string, handler TransportResponse) Channel
 	SendToOne(data *Message, timeout time.Duration) error
 	SendToAll(data *Message, timeout time.Duration) error

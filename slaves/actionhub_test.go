@@ -1,4 +1,4 @@
-package supabaiza
+package slaves
 
 import (
 	"context"
@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/pubsub"
-
-	"github.com/influx6/npkg/njson"
+	"github.com/influx6/sabuhp/testingutils"
 
 	"github.com/influx6/sabuhp"
 
@@ -18,85 +16,8 @@ import (
 
 type Sub struct {
 	Topic    string
-	Callback pubsub.ChannelResponse
+	Callback sabuhp.TransportResponse
 	Channel  sabuhp.Channel
-}
-
-func BasicMsg(topic string, message string, fromAddr string) *sabuhp.Message {
-	return &sabuhp.Message{
-		Topic:    topic,
-		FromAddr: fromAddr,
-		Payload:  []byte(message),
-	}
-}
-
-type noPubSub struct {
-	DelegateFunc  func(message *sabuhp.Message, timeout time.Duration) error
-	BroadcastFunc func(message *sabuhp.Message, timeout time.Duration) error
-	ChannelFunc   func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel
-}
-
-func (n noPubSub) Channel(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
-	if n.ChannelFunc != nil {
-		return n.ChannelFunc(topic, callback)
-	}
-	return &noPubSubChannel{}
-}
-
-func (n noPubSub) Delegate(message *sabuhp.Message, timeout time.Duration) error {
-	if n.DelegateFunc != nil {
-		return n.DelegateFunc(message, timeout)
-	}
-	return nil
-}
-
-func (n noPubSub) Broadcast(message *sabuhp.Message, timeout time.Duration) error {
-	if n.BroadcastFunc != nil {
-		return n.BroadcastFunc(message, timeout)
-	}
-	return nil
-}
-
-type transportImpl struct {
-	ConnFunc      func() sabuhp.Conn
-	SendToOneFunc func(data *sabuhp.Message, timeout time.Duration) error
-	SendToAllFunc func(data *sabuhp.Message, timeout time.Duration) error
-	ListenFunc    func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel
-}
-
-func (t transportImpl) Conn() sabuhp.Conn {
-	return t.ConnFunc()
-}
-
-func (t transportImpl) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
-	return t.ListenFunc(topic, handler)
-}
-
-func (t transportImpl) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
-	return t.SendToOneFunc(data, timeout)
-}
-
-func (t transportImpl) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
-	return t.SendToAllFunc(data, timeout)
-}
-
-type noPubSubChannel struct {
-	Error error
-}
-
-func (n noPubSubChannel) Err() error {
-	return n.Error
-}
-
-func (n noPubSubChannel) Close() {
-	// do nothing
-}
-
-type loggerPub struct{}
-
-func (l loggerPub) Log(cb *njson.JSON) {
-	log.Println(cb.Message())
-	log.Println("")
 }
 
 func TestNewActionHub_StartStop(t *testing.T) {
@@ -108,14 +29,14 @@ func TestNewActionHub_StartStop(t *testing.T) {
 	var sendList []*sabuhp.Message
 	var channel []Sub
 
-	var logger = &loggerPub{}
-	var pubsub = &noPubSub{
+	var logger = &testingutils.LoggerPub{}
+	var pubsub = &testingutils.NoPubSub{
 		BroadcastFunc: func(message *sabuhp.Message, timeout time.Duration) error {
 			sendList = append(sendList, message)
 			return nil
 		},
-		ChannelFunc: func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
-			var noChannel noPubSubChannel
+		ChannelFunc: func(topic string, callback sabuhp.TransportResponse) sabuhp.Channel {
+			var noChannel testingutils.NoPubSubChannel
 			channel = append(channel, Sub{
 				Topic:    topic,
 				Callback: callback,
@@ -154,19 +75,19 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	var sendList []*sabuhp.Message
 	var channels []Sub
 
-	var logger = &loggerPub{}
-	var pubb = &noPubSub{}
+	var logger = &testingutils.LoggerPub{}
+	var pubb = &testingutils.NoPubSub{}
 	pubb.BroadcastFunc = func(message *sabuhp.Message, timeout time.Duration) error {
 		sendList = append(sendList, message)
 		for _, channel := range channels {
 			if channel.Topic == message.Topic {
-				channel.Callback(message, pubb)
+				_ = channel.Callback.Handle(message, pubb)
 			}
 		}
 		return nil
 	}
-	pubb.ChannelFunc = func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
-		var noChannel noPubSubChannel
+	pubb.ChannelFunc = func(topic string, callback sabuhp.TransportResponse) sabuhp.Channel {
+		var noChannel testingutils.NoPubSubChannel
 		channels = append(channels, Sub{
 			Topic:    topic,
 			Callback: callback,
@@ -179,7 +100,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 
 	var ack = make(chan struct{}, 1)
 	var templateRegistry = NewWorkerTemplateRegistry()
-	templateRegistry.Register(ActionWorkerRequest{
+	templateRegistry.Register(WorkerRequest{
 		ActionName:    "say_hello",
 		PubSubTopic:   "say_hello",
 		WorkerCreator: sayHelloAction(ctx, ack),
@@ -197,7 +118,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 
 	require.Len(t, channels, 1)
 
-	require.NoError(t, pubb.Broadcast(&sabuhp.Message{
+	require.NoError(t, pubb.SendToAll(&sabuhp.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
 		Payload:  sabuhp.BinaryPayload("alex"),
@@ -226,23 +147,23 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	var chl sync.Mutex
 	var channels []Sub
 
-	var logger = &loggerPub{}
-	var pubb = &noPubSub{}
+	var logger = &testingutils.LoggerPub{}
+	var pubb = &testingutils.NoPubSub{}
 	pubb.BroadcastFunc = func(message *sabuhp.Message, timeout time.Duration) error {
 		sl.Lock()
 		defer sl.Unlock()
 		sendList = append(sendList, message)
 		for _, channel := range channels {
 			if channel.Topic == message.Topic {
-				channel.Callback(message, pubb)
+				channel.Callback.Handle(message, pubb)
 			}
 		}
 		return nil
 	}
-	pubb.ChannelFunc = func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
+	pubb.ChannelFunc = func(topic string, callback sabuhp.TransportResponse) sabuhp.Channel {
 		chl.Lock()
 		defer chl.Unlock()
-		var noChannel noPubSubChannel
+		var noChannel testingutils.NoPubSubChannel
 		channels = append(channels, Sub{
 			Topic:    topic,
 			Callback: callback,
@@ -266,8 +187,8 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	var ack = make(chan struct{}, 3)
 	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack), SlaveWorkerRequest{
 		ActionName: "hello_slave",
-		Action: func(ctx context.Context, to string, message *sabuhp.Message, sub pubsub.PubSub) {
-			if err := sub.Broadcast(&sabuhp.Message{
+		Action: ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, sub sabuhp.Transport) {
+			if err := sub.SendToAll(&sabuhp.Message{
 				Topic:    "say_hello",
 				FromAddr: to,
 				Payload:  sabuhp.BinaryPayload("slave from hello"),
@@ -275,14 +196,14 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 			}, 0); err != nil {
 				log.Print(err.Error())
 			}
-		},
+		}),
 	}))
 
 	chl.Lock()
 	require.Len(t, channels, 2)
 	chl.Unlock()
 
-	require.NoError(t, pubb.Broadcast(&sabuhp.Message{
+	require.NoError(t, pubb.SendToAll(&sabuhp.Message{
 		FromAddr: "yay",
 		Topic:    "say_hello/slaves/hello_slave",
 		Payload:  sabuhp.BinaryPayload("alex"),
@@ -312,8 +233,8 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	var chl sync.Mutex
 	var channels []Sub
 
-	var logger = &loggerPub{}
-	var pubb = &noPubSub{}
+	var logger = &testingutils.LoggerPub{}
+	var pubb = &testingutils.NoPubSub{}
 	pubb.BroadcastFunc = func(message *sabuhp.Message, timeout time.Duration) error {
 		sl.Lock()
 		defer sl.Unlock()
@@ -321,15 +242,15 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 		sendList = append(sendList, message)
 		for _, channel := range channels {
 			if channel.Topic == message.Topic {
-				channel.Callback(message, pubb)
+				channel.Callback.Handle(message, pubb)
 			}
 		}
 		return nil
 	}
-	pubb.ChannelFunc = func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
+	pubb.ChannelFunc = func(topic string, callback sabuhp.TransportResponse) sabuhp.Channel {
 		chl.Lock()
 		defer chl.Unlock()
-		var noChannel noPubSubChannel
+		var noChannel testingutils.NoPubSubChannel
 		channels = append(channels, Sub{
 			Topic:    topic,
 			Callback: callback,
@@ -357,7 +278,7 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	require.Len(t, channels, 1)
 	chl.Unlock()
 
-	require.NoError(t, pubb.Broadcast(&sabuhp.Message{
+	require.NoError(t, pubb.SendToAll(&sabuhp.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
 		Payload:  sabuhp.BinaryPayload("alex"),
@@ -376,12 +297,12 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	hub.Wait()
 }
 
-func sayHelloAction(ctx context.Context, ack chan struct{}) ActionWorkerGroupCreator {
-	return func(config ActionWorkerConfig) *ActionWorkerGroup {
+func sayHelloAction(ctx context.Context, ack chan struct{}) WorkGroupCreator {
+	return func(config WorkerConfig) *WorkerGroup {
 		config.Instance = ScalingInstances
 		config.Behaviour = RestartAll
-		config.Action = func(ctx context.Context, to string, message *sabuhp.Message, sub pubsub.PubSub) {
-			sub.Broadcast(&sabuhp.Message{
+		config.Action = ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, sub sabuhp.Transport) {
+			_ = sub.SendToAll(&sabuhp.Message{
 				Topic:    message.FromAddr,
 				FromAddr: to,
 				Payload:  sabuhp.BinaryPayload("Hello"),
@@ -395,7 +316,7 @@ func sayHelloAction(ctx context.Context, ack chan struct{}) ActionWorkerGroupCre
 				return
 			}
 
-		}
+		})
 		return NewWorkGroup(config)
 	}
 }

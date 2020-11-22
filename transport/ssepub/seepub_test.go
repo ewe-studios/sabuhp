@@ -10,7 +10,7 @@ import (
 
 	"github.com/influx6/npkg/nxid"
 	"github.com/influx6/sabuhp/codecs"
-	"github.com/influx6/sabuhp/pubsub"
+	"github.com/influx6/sabuhp/managers"
 
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/sabuhp"
@@ -53,14 +53,14 @@ func TestNewSSEHub(t *testing.T) {
 		},
 	}
 	var codec = &codecs.JsonCodec{}
-	var managerConfig = pubsub.ManagerConfig{
+	var managerConfig = managers.ManagerConfig{
 		ID:        nxid.New(),
 		Transport: transport,
 		Codec:     codec,
 		Ctx:       controlCtx,
 		Logger:    logger,
 	}
-	var manager = pubsub.NewManager(managerConfig)
+	var manager = managers.NewManager(managerConfig)
 
 	var sseServer = ManagedSSEServer(controlCtx, logger, manager, nil)
 	require.NotNil(t, sseServer)

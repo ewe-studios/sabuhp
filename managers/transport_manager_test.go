@@ -1,10 +1,11 @@
-package pubsub
+package managers
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
+
+	"github.com/influx6/sabuhp/testingutils"
 
 	"github.com/influx6/sabuhp"
 
@@ -15,7 +16,7 @@ import (
 
 type Sub struct {
 	Topic    string
-	Callback ChannelResponse
+	Callback sabuhp.TransportResponse
 	Channel  sabuhp.Channel
 }
 
@@ -27,84 +28,15 @@ func BasicMsg(topic string, message string, fromAddr string) *sabuhp.Message {
 	}
 }
 
-type noPubSub struct {
-	DelegateFunc  func(message *sabuhp.Message, timeout time.Duration) error
-	BroadcastFunc func(message *sabuhp.Message, timeout time.Duration) error
-	ChannelFunc   func(topic string, callback ChannelResponse) sabuhp.Channel
-}
-
-func (n noPubSub) Channel(topic string, callback ChannelResponse) sabuhp.Channel {
-	if n.ChannelFunc != nil {
-		return n.ChannelFunc(topic, callback)
-	}
-	return &noPubSubChannel{}
-}
-
-func (n noPubSub) Delegate(message *sabuhp.Message, timeout time.Duration) error {
-	if n.DelegateFunc != nil {
-		return n.DelegateFunc(message, timeout)
-	}
-	return nil
-}
-
-func (n noPubSub) Broadcast(message *sabuhp.Message, timeout time.Duration) error {
-	if n.BroadcastFunc != nil {
-		return n.BroadcastFunc(message, timeout)
-	}
-	return nil
-}
-
-type transportImpl struct {
-	ConnFunc      func() sabuhp.Conn
-	SendToOneFunc func(data *sabuhp.Message, timeout time.Duration) error
-	SendToAllFunc func(data *sabuhp.Message, timeout time.Duration) error
-	ListenFunc    func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel
-}
-
-func (t transportImpl) Conn() sabuhp.Conn {
-	return t.ConnFunc()
-}
-
-func (t transportImpl) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
-	return t.ListenFunc(topic, handler)
-}
-
-func (t transportImpl) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
-	return t.SendToOneFunc(data, timeout)
-}
-
-func (t transportImpl) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
-	return t.SendToAllFunc(data, timeout)
-}
-
-type noPubSubChannel struct {
-	Error error
-}
-
-func (n noPubSubChannel) Err() error {
-	return n.Error
-}
-
-func (n noPubSubChannel) Close() {
-	// do nothing
-}
-
-type loggerPub struct{}
-
-func (l loggerPub) Log(cb *njson.JSON) {
-	log.Println(cb.Message())
-	log.Println("")
-}
-
 func TestNewTransportManager(t *testing.T) {
-	var logger = &loggerPub{}
+	var logger = &testingutils.LoggerPub{}
 	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
 
 	var listeners = map[string][]sabuhp.TransportResponse{}
-	var transport = &transportImpl{
+	var transport = &testingutils.TransportImpl{
 		ListenFunc: func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
 			listeners[topic] = append(listeners[topic], handler)
-			return &noPubSubChannel{}
+			return &testingutils.NoPubSubChannel{}
 		},
 		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			var sector = listeners[data.Topic]
@@ -124,7 +56,7 @@ func TestNewTransportManager(t *testing.T) {
 		SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			var targetListeners = listeners[data.Topic]
 			if len(targetListeners) > 0 {
-				targetListeners[0].Handle(data, nil)
+				_ = targetListeners[0].Handle(data, nil)
 			}
 			return nil
 		},

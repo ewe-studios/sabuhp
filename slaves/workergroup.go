@@ -1,12 +1,10 @@
-package supabaiza
+package slaves
 
 import (
 	"context"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/influx6/sabuhp/pubsub"
 
 	"github.com/influx6/sabuhp"
 
@@ -77,22 +75,22 @@ type Escalation struct {
 	OffendingMessage *sabuhp.Message
 }
 
-type WorkerEscalationHandler func(escalation *Escalation, wk *ActionWorkerGroup)
+type WorkerEscalationHandler func(escalation *Escalation, wk *WorkerGroup)
 
-// ActionWorkerConfig contains necessary properties required by a Worker
+// WorkerConfig contains necessary properties required by a Worker
 //
 // An important notice to be given is to ensure any blocking operation in the
-// ActionWorkerConfig.EscalationHandler is shot into a goroutine, else this will
+// WorkerConfig.EscalationHandler is shot into a goroutine, else this will
 // block the WorkerGroup's internal run loop. The responsibility is shifted to the
 // user to provide a more concise, expected behaviour, hence the user should be aware.
-type ActionWorkerConfig struct {
+type WorkerConfig struct {
 	ActionName          string
 	Addr                string
 	MessageBufferSize   int
 	Action              Action
 	MinWorker           int
 	MaxWorkers          int
-	Pubsub              pubsub.PubSub
+	Transport           sabuhp.Transport
 	Behaviour           BehaviourType
 	Instance            InstanceType
 	Context             context.Context
@@ -101,21 +99,21 @@ type ActionWorkerConfig struct {
 	MessageDeliveryWait time.Duration
 }
 
-func (wc *ActionWorkerConfig) ensure() {
+func (wc *WorkerConfig) ensure() {
 	if wc.ActionName == "" {
-		panic("ActionWorkerConfig.ActionName must be provided")
+		panic("WorkerConfig.ActionName must be provided")
 	}
 	if wc.Addr == "" {
-		panic("ActionWorkerConfig.Addr must be provided")
+		panic("WorkerConfig.Addr must be provided")
 	}
 	if wc.Context == nil {
-		panic("ActionWorkerConfig.Context must be provided")
+		panic("WorkerConfig.Context must be provided")
 	}
 	if wc.Action == nil {
-		panic("ActionWorkerConfig.Action must have provided")
+		panic("WorkerConfig.Action must have provided")
 	}
 	if wc.EscalationHandler == nil {
-		panic("ActionWorkerConfig.EscalationHandler must have provided")
+		panic("WorkerConfig.EscalationHandler must have provided")
 	}
 
 	if wc.MessageBufferSize <= 0 {
@@ -145,12 +143,12 @@ func (wc *ActionWorkerConfig) ensure() {
 	}
 }
 
-// ActionWorkerGroup embodies a small action based workgroup which at their default
+// WorkerGroup embodies a small action based workgroup which at their default
 // state are scaling functions for execution across their maximum allowed
-// range. ActionWorkerGroup provide other settings like SingleInstance where only
+// range. WorkerGroup provide other settings like SingleInstance where only
 // one function is allowed or OneTime instance type where for a function
 // runs once and dies off.
-type ActionWorkerGroup struct {
+type WorkerGroup struct {
 	activeWorkers     int64
 	totalIdled        int64
 	totalCreated      int64
@@ -165,7 +163,7 @@ type ActionWorkerGroup struct {
 	cancelDo          sync.Once
 	starterDo         sync.Once
 	context           context.Context
-	config            ActionWorkerConfig
+	config            WorkerConfig
 	waiter            sync.WaitGroup
 	workers           sync.WaitGroup
 	restartSignal     sync.WaitGroup
@@ -178,12 +176,12 @@ type ActionWorkerGroup struct {
 	restarting        bool
 }
 
-func NewWorkGroup(config ActionWorkerConfig) *ActionWorkerGroup {
+func NewWorkGroup(config WorkerConfig) *WorkerGroup {
 	config.ensure()
 
 	var ctx, cancelFn = context.WithCancel(config.Context)
 
-	var w ActionWorkerGroup
+	var w WorkerGroup
 	w.context = ctx
 	w.config = config
 	w.ctxCancelFn = cancelFn
@@ -214,7 +212,7 @@ type WorkerStat struct {
 	BehaviourType           BehaviourType
 }
 
-func (w *ActionWorkerGroup) Stats() WorkerStat {
+func (w *WorkerGroup) Stats() WorkerStat {
 	var maxActive = atomic.LoadInt64(&w.activeWorkers)
 	var maxSlots = atomic.LoadInt64(&w.availableSlots)
 	var totalIdled = atomic.LoadInt64(&w.totalIdled)
@@ -245,18 +243,18 @@ func (w *ActionWorkerGroup) Stats() WorkerStat {
 	}
 }
 
-func (w *ActionWorkerGroup) Ctx() context.Context {
+func (w *WorkerGroup) Ctx() context.Context {
 	return w.context
 }
 
-func (w *ActionWorkerGroup) Start() {
+func (w *WorkerGroup) Start() {
 	w.starterDo.Do(func() {
 		w.startManager()
 		w.bootMinWorker()
 	})
 }
 
-func (w *ActionWorkerGroup) Stop() {
+func (w *WorkerGroup) Stop() {
 	w.cancelDo.Do(func() {
 		w.ctxCancelFn()
 	})
@@ -265,18 +263,18 @@ func (w *ActionWorkerGroup) Stop() {
 }
 
 // Wait block till the group is stopped or killed
-func (w *ActionWorkerGroup) Wait() {
+func (w *WorkerGroup) Wait() {
 	w.workers.Wait()
 	w.waiter.Wait()
 }
 
 // WaitRestart will block if there is a restart
 // process occurring when it's called.
-func (w *ActionWorkerGroup) WaitRestart() {
+func (w *WorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *ActionWorkerGroup) HandleMessage(message *sabuhp.Message) error {
+func (w *WorkerGroup) HandleMessage(message *sabuhp.Message) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -304,12 +302,12 @@ func (w *ActionWorkerGroup) HandleMessage(message *sabuhp.Message) error {
 	}
 }
 
-func (w *ActionWorkerGroup) beginWork() {
+func (w *WorkerGroup) beginWork() {
 	w.workers.Add(1)
 	go w.doWork()
 }
 
-func (w *ActionWorkerGroup) doWork() {
+func (w *WorkerGroup) doWork() {
 	atomic.AddInt64(&w.activeWorkers, 1)
 	atomic.AddInt64(&w.availableSlots, -1)
 
@@ -371,7 +369,7 @@ func (w *ActionWorkerGroup) doWork() {
 
 	var ctx = w.context
 	var action = w.config.Action
-	var pubsub = w.config.Pubsub
+	var pubsub = w.config.Transport
 	var maxIdleness = w.config.MaxIdleness
 
 	for {
@@ -383,7 +381,7 @@ func (w *ActionWorkerGroup) doWork() {
 			return
 		case currentMessage = <-w.jobs:
 			atomic.AddInt64(&w.totalMessages, 1)
-			action(w.context, w.config.Addr, currentMessage, pubsub)
+			action.Do(w.context, w.config.Addr, currentMessage, pubsub)
 			atomic.AddInt64(&w.totalProcessed, 1)
 
 			if w.config.Instance == OneTimeInstance {
@@ -395,12 +393,12 @@ func (w *ActionWorkerGroup) doWork() {
 	}
 }
 
-func (w *ActionWorkerGroup) startManager() {
+func (w *WorkerGroup) startManager() {
 	w.waiter.Add(1)
 	go w.manage()
 }
 
-func (w *ActionWorkerGroup) manage() {
+func (w *WorkerGroup) manage() {
 	defer w.waiter.Done()
 
 	var ctx = w.context
@@ -448,7 +446,7 @@ manageLoop:
 	}
 }
 
-func (w *ActionWorkerGroup) restartAll() {
+func (w *WorkerGroup) restartAll() {
 	w.workers.Wait()
 	go w.startManager()
 	w.endRestart()
@@ -456,7 +454,7 @@ func (w *ActionWorkerGroup) restartAll() {
 	w.restartSignal.Done()
 }
 
-func (w *ActionWorkerGroup) isRestarting() bool {
+func (w *WorkerGroup) isRestarting() bool {
 	w.rm.Lock()
 	if w.restarting {
 		w.rm.Unlock()
@@ -466,20 +464,20 @@ func (w *ActionWorkerGroup) isRestarting() bool {
 	return false
 }
 
-func (w *ActionWorkerGroup) enterRestart() {
+func (w *WorkerGroup) enterRestart() {
 	w.restartSignal.Add(1)
 	w.rm.Lock()
 	w.restarting = true
 	w.rm.Unlock()
 }
 
-func (w *ActionWorkerGroup) endRestart() {
+func (w *WorkerGroup) endRestart() {
 	w.rm.Lock()
 	w.restarting = false
 	w.rm.Unlock()
 }
 
-func (w *ActionWorkerGroup) endWorkers() {
+func (w *WorkerGroup) endWorkers() {
 	var maxActive = int(atomic.LoadInt64(&w.activeWorkers))
 	for i := 0; i < maxActive; i++ {
 		select {
@@ -493,7 +491,7 @@ func (w *ActionWorkerGroup) endWorkers() {
 	}
 }
 
-func (w *ActionWorkerGroup) bootMinWorker() {
+func (w *WorkerGroup) bootMinWorker() {
 	if w.isRestarting() {
 		return
 	}
@@ -520,11 +518,11 @@ func (w *ActionWorkerGroup) bootMinWorker() {
 // a master node has specific actions group along as dependent actions
 // where the death of the master leads to the death of the slaves.
 type MasterWorkerGroup struct {
-	Master *ActionWorkerGroup
-	Slaves map[string]*ActionWorkerGroup
+	Master *WorkerGroup
+	Slaves map[string]*WorkerGroup
 }
 
-func (mg *MasterWorkerGroup) AddSlave(slave *ActionWorkerGroup) {
+func (mg *MasterWorkerGroup) AddSlave(slave *WorkerGroup) {
 	mg.Slaves[slave.config.Addr] = slave
 }
 
@@ -557,7 +555,7 @@ func (mg *MasterWorkerGroup) Stop() {
 	// close all slave workgroup.
 	for _, slave := range mg.Slaves {
 		waiter.Add(1)
-		go func(slaveGroup *ActionWorkerGroup) {
+		go func(slaveGroup *WorkerGroup) {
 			defer waiter.Done()
 			slaveGroup.Stop()
 		}(slave)

@@ -1,4 +1,4 @@
-package pubsub
+package managers
 
 import (
 	"context"
@@ -22,7 +22,7 @@ var (
 //
 // It uses a TransportManager to support multiple subscribers per topic (which somewhat
 // limits the capacity of tracking if each subscriber received all messages and redelivery)
-// but allows us use multiple protocols to talk to the same pubsub transportManager to handle message
+// but allows us use multiple protocols to talk to the same mailer transportManager to handle message
 // delivery to and from these protocols.
 type Manager struct {
 	ctx              context.Context

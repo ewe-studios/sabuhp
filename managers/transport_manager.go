@@ -1,4 +1,4 @@
-package pubsub
+package managers
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 	"github.com/influx6/npkg/nxid"
 	"github.com/influx6/sabuhp"
 )
+
+type SocketNotification func(socket sabuhp.Socket)
 
 // TransportManager wraps a transport object exposes a wrapper that underline manages
 // multiple subscriptions on a per topic basis.

@@ -1,18 +1,20 @@
-package pubsub
+package mbox
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/influx6/sabuhp/testingutils"
+
 	"github.com/influx6/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
 
-var logger = &loggerPub{}
-var pubsub = &noPubSub{}
-var transport = &transportImpl{
+var logger = &testingutils.LoggerPub{}
+var mailer = &Mailer{}
+var transport = &testingutils.TransportImpl{
 	ConnFunc: func() sabuhp.Conn {
 		return nil
 	},
@@ -33,7 +35,7 @@ func TestMailbox_StartAndStop(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -51,7 +53,7 @@ func TestMailbox_StartAndStopWithCancel(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -73,7 +75,7 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -87,11 +89,12 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 	}
 
 	var delivered = make(chan struct{})
-	var channel = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 
 	require.NotNil(t, channel)
 	require.NoError(t, helloMailbox.Deliver(message))
@@ -108,7 +111,7 @@ func TestMailbox_2Subscribers(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -122,18 +125,20 @@ func TestMailbox_2Subscribers(t *testing.T) {
 	}
 
 	var delivered = make(chan struct{}, 2)
-	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel2)
 
 	require.NoError(t, helloMailbox.Deliver(message))
@@ -151,7 +156,7 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -166,25 +171,28 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel3 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel3)
 
 	require.NoError(t, helloMailbox.Deliver(message))
@@ -213,7 +221,7 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -228,25 +236,28 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel3 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel3)
 
 	require.NoError(t, helloMailbox.Deliver(message))
@@ -275,7 +286,7 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		pubsub,
+		mailer,
 		transport,
 	)
 
@@ -290,25 +301,28 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 
 	var delivered = make(chan struct{}, 3)
 
-	var channel1 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel1 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel1)
 
-	var channel2 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel2 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel2)
 
-	var channel3 = helloMailbox.Add(func(data *sabuhp.Message, sub PubSub) {
+	var channel3 = helloMailbox.Add(sabuhp.TransportResponseFunc(func(data *sabuhp.Message, tt sabuhp.Transport) sabuhp.MessageErr {
 		require.Equal(t, message, data)
-		require.NotNil(t, sub)
+		require.NotNil(t, tt)
 		delivered <- struct{}{}
-	})
+		return nil
+	}))
 	require.NotNil(t, channel3)
 
 	require.NoError(t, helloMailbox.Deliver(message))

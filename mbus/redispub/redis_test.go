@@ -111,25 +111,29 @@ func TestRedis_PubSub_SendToAll(t *testing.T) {
 	var delivered sync.WaitGroup
 	delivered.Add(2)
 
-	var channel = pb.Listen("what", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
-		delivered.Done()
+	var channel = pb.Listen(
+		"what",
+		sabuhp.TransportResponseFunc(
+			func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+				delivered.Done()
 
-		if err := transport.SendToAll(whyMessage, 0); err != nil {
-			logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
-				event.String("error", err.Error())
+				if err := transport.SendToAll(whyMessage, 0); err != nil {
+					logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
+						event.String("error", err.Error())
+					}))
+				}
+				return nil
 			}))
-		}
-		return nil
-	}))
 
 	require.NoError(t, channel.Err())
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
-		delivered.Done()
-		return nil
-	}))
+	var channel2 = pb.Listen("why", sabuhp.TransportResponseFunc(
+		func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			delivered.Done()
+			return nil
+		}))
 
 	require.NoError(t, channel2.Err())
 
@@ -166,24 +170,26 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 	var delivered sync.WaitGroup
 	delivered.Add(2)
 
-	var channel = pb.Listen("what", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
-		delivered.Done()
-		if err := transport.SendToOne(whyMessage, 0); err != nil {
-			logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
-				event.String("error", err.Error())
-			}))
-		}
-		return nil
-	}))
+	var channel = pb.Listen("what",
+		sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			delivered.Done()
+			if err := transport.SendToOne(whyMessage, 0); err != nil {
+				logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
+					event.String("error", err.Error())
+				}))
+			}
+			return nil
+		}))
 
 	require.NoError(t, channel.Err())
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why", sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
-		delivered.Done()
-		return nil
-	}))
+	var channel2 = pb.Listen("why",
+		sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			delivered.Done()
+			return nil
+		}))
 
 	require.NoError(t, channel2.Err())
 

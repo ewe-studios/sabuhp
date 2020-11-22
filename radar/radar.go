@@ -6,7 +6,7 @@ import (
 
 	"github.com/influx6/sabuhp/utils"
 
-	"github.com/influx6/sabuhp/pubsub"
+	"github.com/influx6/sabuhp/managers"
 
 	"github.com/influx6/npkg/njson"
 
@@ -18,7 +18,7 @@ type MuxConfig struct {
 	RootPath string
 	Logger   sabuhp.Logger
 	NotFound sabuhp.Handler
-	Manager  *pubsub.Manager
+	Manager  *managers.Manager
 }
 
 // Mux is Request multiplexer.
@@ -34,7 +34,7 @@ type Mux struct {
 	subRoutes []sabuhp.MessageRouter
 	pre       sabuhp.Wrappers
 	preHttp   sabuhp.HttpWrappers
-	manager   *pubsub.Manager
+	manager   *managers.Manager
 }
 
 func NewMux(config MuxConfig) *Mux {
@@ -63,8 +63,9 @@ type HttpService struct {
 	handler sabuhp.Handler
 }
 
-func (h *HttpService) Handler(handler sabuhp.Handler) {
+func (h *HttpService) Handler(handler sabuhp.Handler) *HttpService {
 	h.handler = handler
+	return h
 }
 
 func (h *HttpService) Add() {

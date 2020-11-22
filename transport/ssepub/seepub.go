@@ -18,7 +18,7 @@ import (
 
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp/pubsub"
+	"github.com/influx6/sabuhp/managers"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -37,7 +37,7 @@ var _ sabuhp.Handler = (*SSEServer)(nil)
 func ManagedSSEServer(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	manager *pubsub.Manager,
+	manager *managers.Manager,
 	optionalHeaders HeaderModifications,
 ) *SSEServer {
 	return &SSEServer{
@@ -53,7 +53,7 @@ type SSEServer struct {
 	logger          sabuhp.Logger
 	optionalHeaders HeaderModifications
 	ctx             context.Context
-	manager         *pubsub.Manager
+	manager         *managers.Manager
 	ssl             sync.RWMutex
 	sockets         map[string]*SSESocket
 }
@@ -82,7 +82,10 @@ func (sse *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Params) {
 	var clientId = r.Header.Get(ClientIdentificationHeader)
 
-	njson.Log(sse.logger).New().
+	var stack = njson.Log(sse.logger)
+	defer njson.ReleaseLogStack(stack)
+
+	stack.New().
 		Info().
 		Message("Received new sse request").
 		String("client_id", clientId).
@@ -97,14 +100,14 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			cerr, "Failed to decode request into message",
 			http.StatusInternalServerError,
 		); err != nil {
-			njson.Log(sse.logger).New().
+			stack.New().
 				Error().
 				Message("failed to send message into transport").
 				String("error", nerror.WrapOnly(cerr).Error()).
 				End()
 		}
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Error().
 			Message("failed to send message on transport").
 			String("error", nerror.WrapOnly(cerr).Error()).
@@ -120,14 +123,14 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			cerr, "Failed to decode request into message",
 			http.StatusInternalServerError,
 		); err != nil {
-			njson.Log(sse.logger).New().
+			stack.New().
 				Error().
 				Message("failed to send message into transport").
 				String("error", nerror.WrapOnly(cerr).Error()).
 				End()
 		}
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Error().
 			Message("failed to send message on transport").
 			String("error", nerror.WrapOnly(cerr).Error()).
@@ -135,7 +138,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		return
 	}
 
-	njson.Log(sse.logger).New().
+	stack.New().
 		Info().
 		Message("valid client id provided").
 		String("client_id", clientId).
@@ -146,7 +149,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 	sse.ssl.RUnlock()
 
 	if !hasSocket {
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("creating new sse socket for request").
 			String("client_id", clientId).
@@ -162,7 +165,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			sse.optionalHeaders,
 		)
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("starting sse socket").
 			String("client_id", clientId).
@@ -176,13 +179,13 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 				"Failed to decode request into message",
 				http.StatusInternalServerError,
 			); err != nil {
-				njson.Log(sse.logger).New().
+				stack.New().
 					Message("failed to send message into transport").
 					String("error", nerror.WrapOnly(startSocketErr).Error()).
 					End()
 			}
 
-			njson.Log(sse.logger).New().
+			stack.New().
 				Error().
 				Message("failed to send message on transport").
 				String("error", nerror.WrapOnly(startSocketErr).Error()).
@@ -190,7 +193,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			return
 		}
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("started sse socket").
 			String("client_id", clientId).
@@ -200,13 +203,13 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		sse.sockets[clientId] = socket
 		sse.ssl.Unlock()
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("added sse socket client into registry").
 			String("client_id", clientId).
 			End()
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("inform manager for new socket").
 			String("client_id", clientId).
@@ -214,13 +217,13 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 
 		sse.manager.ManageSocketOpened(socket)
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("informed manager for new socket").
 			String("client_id", clientId).
 			End()
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("await socket closure").
 			String("client_id", clientId).
@@ -230,7 +233,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 
 		sse.manager.ManageSocketClosed(socket)
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Info().
 			Message("socket sse closed by connection").
 			String("client_id", clientId).
@@ -238,7 +241,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		return
 	}
 
-	njson.Log(sse.logger).New().
+	stack.New().
 		Info().
 		Message("existing sse client socket found, must be a request").
 		String("client_id", clientId).
@@ -253,14 +256,14 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			"Failed to read request body",
 			http.StatusBadRequest,
 		); err != nil {
-			njson.Log(sse.logger).New().
+			stack.New().
 				Error().
 				Message("failed to read request body").
 				String("error", nerror.WrapOnly(terr).Error()).
 				End()
 		}
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Error().
 			Message("failed to read request body").
 			String("error", nerror.WrapOnly(terr).Error()).
@@ -268,7 +271,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		return
 	}
 
-	njson.Log(sse.logger).New().
+	stack.New().
 		Info().
 		Message("copied request from body").
 		String("client_id", clientId).
@@ -283,14 +286,14 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			"Failed to send request body",
 			http.StatusInternalServerError,
 		); err != nil {
-			njson.Log(sse.logger).New().
+			stack.New().
 				Error().
 				Message("failed to write delivery error to response").
 				String("error", nerror.WrapOnly(deliveryErr).Error()).
 				End()
 		}
 
-		njson.Log(sse.logger).New().
+		stack.New().
 			Error().
 			Message("failed to send deliver request body").
 			String("error", nerror.WrapOnly(deliveryErr).Error()).
@@ -298,7 +301,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		return
 	}
 
-	njson.Log(sse.logger).New().
+	stack.New().
 		Info().
 		Message("delivered message to sse socket").
 		String("client_id", clientId).
@@ -320,7 +323,7 @@ type SSESocket struct {
 	rcvMsgs    chan []byte
 	ctx        context.Context
 	canceler   context.CancelFunc
-	manager    *pubsub.Manager
+	manager    *managers.Manager
 	waiter     sync.WaitGroup
 	headers    HeaderModifications
 	remoteAddr net.Addr
@@ -337,7 +340,7 @@ func NewSSESocket(
 	r *http.Request,
 	w http.ResponseWriter,
 	logger sabuhp.Logger,
-	manager *pubsub.Manager,
+	manager *managers.Manager,
 	optionalHeaders HeaderModifications,
 ) *SSESocket {
 	var newCtx, newCanceler = context.WithCancel(ctx)
@@ -473,6 +476,9 @@ func (se *SSESocket) manageReads() {
 
 	var requestContext = se.req.Context()
 
+	var stack = njson.Log(se.logger)
+	defer njson.ReleaseLogStack(stack)
+
 doLoop:
 	for {
 		select {
@@ -482,14 +488,14 @@ doLoop:
 			break doLoop
 		case msg := <-se.rcvMsgs:
 			atomic.AddInt64(&se.received, 1)
-			njson.Log(se.logger).New().
+			stack.New().
 				Info().
 				Message("received new data from client").
 				Bytes("data", msg).
 				End()
 
 			if handleErr := se.manager.HandleSocketMessage(msg, se); handleErr != nil {
-				njson.Log(se.logger).New().
+				stack.New().
 					Message("failed handle socket message").
 					String("error", nerror.WrapOnly(handleErr).Error()).
 					End()
@@ -506,14 +512,17 @@ func (se *SSESocket) sendWrite(builder *strings.Builder, msg []byte) error {
 	builder.Write(msg)
 	builder.WriteString("\n\n")
 
-	njson.Log(se.logger).New().
+	var stack = njson.Log(se.logger)
+	defer njson.ReleaseLogStack(stack)
+
+	stack.New().
 		Info().
 		Message("sending new data into writer").
 		String("data", builder.String()).
 		End()
 
 	if sentCount, writeErr := se.res.Write(nunsafe.String2Bytes(builder.String())); writeErr != nil {
-		njson.Log(se.logger).New().
+		stack.New().
 			Error().
 			Message("failed to write data to http response writer").
 			String("error", nerror.WrapOnly(writeErr).Error()).
@@ -526,6 +535,9 @@ func (se *SSESocket) sendWrite(builder *strings.Builder, msg []byte) error {
 
 func (se *SSESocket) manageWrites(flusher http.Flusher) {
 	defer se.waiter.Done()
+
+	var stack = njson.Log(se.logger)
+	defer njson.ReleaseLogStack(stack)
 
 	var requestContext = se.req.Context()
 	var builder strings.Builder
@@ -543,7 +555,7 @@ doLoop:
 			atomic.AddInt64(&se.sent, 1)
 
 			if err := se.sendWrite(&builder, msg); err != nil {
-				njson.Log(se.logger).New().
+				stack.New().
 					Error().
 					Message("write failed").
 					String("error", err.Error()).

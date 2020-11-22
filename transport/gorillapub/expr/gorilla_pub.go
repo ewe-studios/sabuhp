@@ -9,7 +9,7 @@ import (
 
 	"github.com/influx6/sabuhp/transport/gorillapub"
 
-	"github.com/influx6/sabuhp/pubsub"
+	"github.com/influx6/sabuhp/managers"
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nerror"
@@ -46,8 +46,8 @@ type PubConfig struct {
 	Codec         sabuhp.Codec
 	Ctx           context.Context
 	Logger        sabuhp.Logger
-	OnClosure     pubsub.SocketNotification
-	OnOpen        pubsub.SocketNotification
+	OnClosure     managers.SocketNotification
+	OnOpen        managers.SocketNotification
 	ConfigHandler gorillapub.ConfigCreator
 	MaxWaitToSend time.Duration
 }

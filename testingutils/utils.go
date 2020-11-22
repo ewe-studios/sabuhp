@@ -4,8 +4,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/influx6/sabuhp/pubsub"
-
 	"github.com/influx6/sabuhp"
 
 	"github.com/influx6/npkg/njson"
@@ -25,29 +23,33 @@ func (n NoPubSubChannel) Close() {
 	// do nothing
 }
 
-var _ pubsub.PubSub = (*NoPubSub)(nil)
+var _ sabuhp.Transport = (*NoPubSub)(nil)
 
 type NoPubSub struct {
 	DelegateFunc  func(message *sabuhp.Message, timeout time.Duration) error
 	BroadcastFunc func(message *sabuhp.Message, timeout time.Duration) error
-	ChannelFunc   func(topic string, callback pubsub.ChannelResponse) sabuhp.Channel
+	ChannelFunc   func(topic string, callback sabuhp.TransportResponse) sabuhp.Channel
 }
 
-func (n NoPubSub) Channel(topic string, callback pubsub.ChannelResponse) sabuhp.Channel {
+func (n NoPubSub) Conn() sabuhp.Conn {
+	return n
+}
+
+func (n NoPubSub) Listen(topic string, callback sabuhp.TransportResponse) sabuhp.Channel {
 	if n.ChannelFunc != nil {
 		return n.ChannelFunc(topic, callback)
 	}
 	return &NoPubSubChannel{}
 }
 
-func (n NoPubSub) Delegate(message *sabuhp.Message, timeout time.Duration) error {
+func (n NoPubSub) SendToOne(message *sabuhp.Message, timeout time.Duration) error {
 	if n.DelegateFunc != nil {
 		return n.DelegateFunc(message, timeout)
 	}
 	return nil
 }
 
-func (n NoPubSub) Broadcast(message *sabuhp.Message, timeout time.Duration) error {
+func (n NoPubSub) SendToAll(message *sabuhp.Message, timeout time.Duration) error {
 	if n.BroadcastFunc != nil {
 		return n.BroadcastFunc(message, timeout)
 	}

@@ -1,4 +1,4 @@
-package pubsub
+package mbox
 
 import (
 	"context"
@@ -6,23 +6,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/influx6/sabuhp/testingutils"
+
 	"github.com/influx6/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestPubSub(t *testing.T) {
-	var logger = &loggerPub{}
+	var logger = &testingutils.LoggerPub{}
 
 	var listeners = map[string][]sabuhp.TransportResponse{}
 
-	var transport = &transportImpl{
+	var transport = &testingutils.TransportImpl{
 		ConnFunc: func() sabuhp.Conn {
 			return nil
 		},
 		ListenFunc: func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
 			listeners[topic] = append(listeners[topic], handler)
-			return &noPubSubChannel{}
+			return &testingutils.NoPubSubChannel{}
 		},
 		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
 			for _, handler := range listeners[data.Topic] {
@@ -47,7 +49,7 @@ func TestPubSub(t *testing.T) {
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var pubsub = NewPubSubImpl(
+	var pubsub = NewMailer(
 		ctx,
 		10,
 		logger,
@@ -57,15 +59,16 @@ func TestPubSub(t *testing.T) {
 	var sendWaiter sync.WaitGroup
 	sendWaiter.Add(2)
 
-	var channel = pubsub.Channel("hello", func(data *sabuhp.Message, sub PubSub) {
+	var channel = pubsub.Listen("hello", sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
 		defer sendWaiter.Done()
 		require.NotNil(t, data)
 		require.NotNil(t, sub)
-	})
+		return nil
+	}))
 	require.NotNil(t, channel)
 
-	require.NoError(t, pubsub.Delegate(message, 0))
-	require.NoError(t, pubsub.Broadcast(message, 0))
+	require.NoError(t, pubsub.SendToOne(message, 0))
+	require.NoError(t, pubsub.SendToAll(message, 0))
 
 	sendWaiter.Wait()
 

@@ -18,7 +18,7 @@ import (
 	"github.com/Ewe-Studios/websocket"
 
 	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/pubsub"
+	"github.com/influx6/sabuhp/managers"
 
 	"github.com/influx6/sabuhp/utils"
 )
@@ -110,14 +110,76 @@ func HttpUpgrader(
 	}
 }
 
+func UpgraderHandler(
+	logger sabuhp.Logger,
+	hub *GorillaHub,
+	upgrader *websocket.Upgrader,
+	custom CustomHeader,
+) sabuhp.Handler {
+	return sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+		var customHeaders http.Header
+		if custom != nil {
+			customHeaders = custom(request)
+		}
+		var socket, socketCreateErr = upgrader.Upgrade(writer, request, customHeaders)
+		if socketCreateErr != nil {
+			logger.Log(njson.MJSON("failed to upgrade websocket", func(event npkg.Encoder) {
+				event.Object("params", p)
+				event.String("host", request.Host)
+				event.String("method", request.Method)
+				event.String("remote_addr", request.RemoteAddr)
+				event.String("request_uri", request.RequestURI)
+				event.String("error", nerror.WrapOnly(socketCreateErr).Error())
+
+				event.ObjectFor("headers", func(headerEncoder npkg.ObjectEncoder) {
+					for k, v := range request.Header {
+						func(key string, value []string) {
+							headerEncoder.ListFor(key, func(listEncoder npkg.ListEncoder) {
+								for _, val := range value {
+									listEncoder.AddString(val)
+								}
+							})
+						}(k, v)
+					}
+				})
+			}))
+			return
+		}
+
+		var socketHandler = hub.HandleSocket(socket)
+		if handleSocketErr := socketHandler.Run(); handleSocketErr != nil {
+			logger.Log(njson.MJSON("error out during socket handling", func(event npkg.Encoder) {
+				event.Object("params", p)
+				event.String("host", request.Host)
+				event.String("method", request.Method)
+				event.String("remote_addr", request.RemoteAddr)
+				event.String("request_uri", request.RequestURI)
+				event.String("error", nerror.WrapOnly(socketCreateErr).Error())
+
+				event.ObjectFor("headers", func(headerEncoder npkg.ObjectEncoder) {
+					for k, v := range request.Header {
+						func(key string, value []string) {
+							headerEncoder.ListFor(key, func(listEncoder npkg.ListEncoder) {
+								for _, val := range value {
+									listEncoder.AddString(val)
+								}
+							})
+						}(k, v)
+					}
+				})
+			}))
+		}
+	})
+}
+
 type ConfigCreator func(config SocketConfig) SocketConfig
 
 type HubConfig struct {
 	Ctx           context.Context
 	Logger        sabuhp.Logger
 	Handler       sabuhp.MessageHandler
-	OnClosure     pubsub.SocketNotification
-	OnOpen        pubsub.SocketNotification
+	OnClosure     managers.SocketNotification
+	OnOpen        managers.SocketNotification
 	ConfigHandler ConfigCreator
 }
 
@@ -132,13 +194,13 @@ type GorillaHub struct {
 	sockets  map[nxid.ID]*GorillaSocket
 }
 
-// ManagedGorillaHub returns a new instance of a gorilla hub which uses a pubsub.Manager
+// ManagedGorillaHub returns a new instance of a gorilla hub which uses a managers.Manager
 // to manage communication across various websocket connections.
 //
 // It allows the manager to delegate connections management to a suitable type (i.e GorillaHub)
 // and in the future other protocols/transport while the manager uses the central message bus transport
 // to communicate to other services and back to the connections.
-func ManagedGorillaHub(logger sabuhp.Logger, manager *pubsub.Manager, optionalConfigCreator ConfigCreator) *GorillaHub {
+func ManagedGorillaHub(logger sabuhp.Logger, manager *managers.Manager, optionalConfigCreator ConfigCreator) *GorillaHub {
 	return NewGorillaHub(HubConfig{
 		Logger:        logger,
 		Ctx:           manager.Ctx(),

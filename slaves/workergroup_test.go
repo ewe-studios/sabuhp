@@ -1,4 +1,4 @@
-package supabaiza
+package slaves
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/pubsub"
+	"github.com/influx6/sabuhp/testingutils"
 
 	"github.com/influx6/sabuhp"
 
@@ -15,17 +15,17 @@ import (
 
 var testName = "test_action"
 
-func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) ActionWorkerConfig { //nolint:lll
-	return ActionWorkerConfig{
+func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) WorkerConfig { //nolint:lll
+	return WorkerConfig{
 		Context:             ctx,
 		MessageBufferSize:   buffer,
-		Pubsub:              &noPubSub{},
+		Transport:           &testingutils.NoPubSub{},
 		Addr:                testName,
 		ActionName:          testName,
 		Action:              action,
 		MaxWorkers:          max,
 		MessageDeliveryWait: time.Millisecond * 100,
-		EscalationHandler: func(escalation *Escalation, wk *ActionWorkerGroup) {
+		EscalationHandler: func(escalation *Escalation, wk *WorkerGroup) {
 
 		},
 	}
@@ -36,7 +36,7 @@ func TestNewWorkGroup(t *testing.T) {
 	count.Add(10)
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -75,7 +75,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			require.NotNil(t, ctx)
 			require.NotNil(t, message)
 			require.NotNil(t, pubsub)
@@ -124,7 +124,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			panic("Killed to restart")
 		},
 		1,
@@ -135,7 +135,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 
 	config.MinWorker = 2
 	config.Behaviour = RestartAll
-	config.EscalationHandler = func(escalation *Escalation, wk *ActionWorkerGroup) {
+	config.EscalationHandler = func(escalation *Escalation, wk *WorkerGroup) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, escalation.Data)
 		require.NotNil(t, escalation.OffendingMessage)
@@ -175,7 +175,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		func(ctx context.Context, to string, message *sabuhp.Message, pubsub pubsub.PubSub) {
+		func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
 			panic("Killed to restart")
 		},
 		1,
@@ -186,7 +186,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 
 	config.MinWorker = 2
 	config.Behaviour = StopAllAndEscalate
-	config.EscalationHandler = func(escalation *Escalation, wk *ActionWorkerGroup) {
+	config.EscalationHandler = func(escalation *Escalation, wk *WorkerGroup) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, escalation.Data)
 		require.NotNil(t, escalation.OffendingMessage)
