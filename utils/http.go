@@ -67,7 +67,9 @@ func DoRequest(
 	}
 
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		defer response.Body.Close()
+		defer func() {
+			_ = response.Body.Close()
+		}()
 
 		message, _ := ioutil.ReadAll(response.Body)
 		var requestErr = RequestErr{

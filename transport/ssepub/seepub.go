@@ -28,8 +28,8 @@ import (
 const (
 	MinClientIdLength          = 7
 	SSEStreamHeader            = "event: sse-streams"
-	ClientIdentificationHeader = "X-SEE-ClientId"
-	LastEventIdListHeader      = "X-SSE-Last-Event-IDS"
+	ClientIdentificationHeader = "X-SSE-Client-Id"
+	LastEventIdListHeader      = "X-SSE-Last-Event-Ids"
 )
 
 var _ sabuhp.Handler = (*SSEServer)(nil)
@@ -58,8 +58,36 @@ type SSEServer struct {
 	sockets         map[string]*SSESocket
 }
 
+// ServeHTTP implements the http.Handler interface.
+//
+// It collects all values from http.Request.ParseForm() as params map
+// and calls them with SSEServer.Handle.
+func (sse *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if parseErr := r.ParseForm(); parseErr != nil {
+		njson.Log(sse.logger).New().
+			Message("failed to parse forms, might be non form request").
+			String("error", nerror.WrapOnly(parseErr).Error()).
+			End()
+		return
+	}
+
+	var param = sabuhp.Params{}
+	for key := range r.Form {
+		param.Set(key, r.Form.Get(key))
+	}
+
+	sse.Handle(w, r, param)
+}
+
 func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Params) {
 	var clientId = r.Header.Get(ClientIdentificationHeader)
+
+	njson.Log(sse.logger).New().
+		Info().
+		Message("Received new sse request").
+		String("client_id", clientId).
+		End()
+
 	clientIdCount := len(clientId)
 	if clientIdCount == 0 {
 		var cerr = nerror.New("Request does not have the client identification header")
@@ -70,17 +98,20 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			http.StatusInternalServerError,
 		); err != nil {
 			njson.Log(sse.logger).New().
+				Error().
 				Message("failed to send message into transport").
 				String("error", nerror.WrapOnly(cerr).Error()).
 				End()
 		}
 
 		njson.Log(sse.logger).New().
+			Error().
 			Message("failed to send message on transport").
 			String("error", nerror.WrapOnly(cerr).Error()).
 			End()
 		return
 	}
+
 	if clientIdCount < MinClientIdLength {
 		var cerr = nerror.New("Request client identification is less than minimum id length")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -90,23 +121,37 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			http.StatusInternalServerError,
 		); err != nil {
 			njson.Log(sse.logger).New().
+				Error().
 				Message("failed to send message into transport").
 				String("error", nerror.WrapOnly(cerr).Error()).
 				End()
 		}
 
 		njson.Log(sse.logger).New().
+			Error().
 			Message("failed to send message on transport").
 			String("error", nerror.WrapOnly(cerr).Error()).
 			End()
 		return
 	}
 
+	njson.Log(sse.logger).New().
+		Info().
+		Message("valid client id provided").
+		String("client_id", clientId).
+		End()
+
 	sse.ssl.RLock()
 	var existingSocket, hasSocket = sse.sockets[clientId]
 	sse.ssl.RUnlock()
 
 	if !hasSocket {
+		njson.Log(sse.logger).New().
+			Info().
+			Message("creating new sse socket for request").
+			String("client_id", clientId).
+			End()
+
 		var socket = NewSSESocket(
 			clientId,
 			sse.ctx,
@@ -116,6 +161,13 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			sse.manager,
 			sse.optionalHeaders,
 		)
+
+		njson.Log(sse.logger).New().
+			Info().
+			Message("starting sse socket").
+			String("client_id", clientId).
+			End()
+
 		if startSocketErr := socket.Start(); startSocketErr != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := utils.CreateError(
@@ -131,22 +183,66 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			}
 
 			njson.Log(sse.logger).New().
+				Error().
 				Message("failed to send message on transport").
 				String("error", nerror.WrapOnly(startSocketErr).Error()).
 				End()
 			return
 		}
 
+		njson.Log(sse.logger).New().
+			Info().
+			Message("started sse socket").
+			String("client_id", clientId).
+			End()
+
 		sse.ssl.Lock()
 		sse.sockets[clientId] = socket
 		sse.ssl.Unlock()
 
+		njson.Log(sse.logger).New().
+			Info().
+			Message("added sse socket client into registry").
+			String("client_id", clientId).
+			End()
+
+		njson.Log(sse.logger).New().
+			Info().
+			Message("inform manager for new socket").
+			String("client_id", clientId).
+			End()
+
 		sse.manager.ManageSocketOpened(socket)
+
+		njson.Log(sse.logger).New().
+			Info().
+			Message("informed manager for new socket").
+			String("client_id", clientId).
+			End()
+
+		njson.Log(sse.logger).New().
+			Info().
+			Message("await socket closure").
+			String("client_id", clientId).
+			End()
 
 		socket.Wait()
 
 		sse.manager.ManageSocketClosed(socket)
+
+		njson.Log(sse.logger).New().
+			Info().
+			Message("socket sse closed by connection").
+			String("client_id", clientId).
+			End()
+		return
 	}
+
+	njson.Log(sse.logger).New().
+		Info().
+		Message("existing sse client socket found, must be a request").
+		String("client_id", clientId).
+		End()
 
 	var buffer bytes.Buffer
 	if _, terr := io.Copy(&buffer, r.Body); terr != nil {
@@ -158,17 +254,26 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			http.StatusBadRequest,
 		); err != nil {
 			njson.Log(sse.logger).New().
+				Error().
 				Message("failed to read request body").
 				String("error", nerror.WrapOnly(terr).Error()).
 				End()
 		}
 
 		njson.Log(sse.logger).New().
+			Error().
 			Message("failed to read request body").
 			String("error", nerror.WrapOnly(terr).Error()).
 			End()
 		return
 	}
+
+	njson.Log(sse.logger).New().
+		Info().
+		Message("copied request from body").
+		String("client_id", clientId).
+		Bytes("message", buffer.Bytes()).
+		End()
 
 	if deliveryErr := existingSocket.SendRead(buffer.Bytes(), 0); deliveryErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -179,17 +284,26 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			http.StatusInternalServerError,
 		); err != nil {
 			njson.Log(sse.logger).New().
+				Error().
 				Message("failed to write delivery error to response").
 				String("error", nerror.WrapOnly(deliveryErr).Error()).
 				End()
 		}
 
 		njson.Log(sse.logger).New().
+			Error().
 			Message("failed to send deliver request body").
 			String("error", nerror.WrapOnly(deliveryErr).Error()).
 			End()
 		return
 	}
+
+	njson.Log(sse.logger).New().
+		Info().
+		Message("delivered message to sse socket").
+		String("client_id", clientId).
+		Bytes("message", buffer.Bytes()).
+		End()
 }
 
 var _ sabuhp.Socket = (*SSESocket)(nil)
@@ -234,12 +348,33 @@ func NewSSESocket(
 		clientId: clientId,
 		ctx:      newCtx,
 		manager:  manager,
+		remoteAddr: &sseAddr{
+			network: "tcp",
+			addr:    r.RemoteAddr,
+		},
+		localAddr: &sseAddr{
+			network: "tcp",
+			addr:    "0.0.0.0",
+		},
 		xid:      nxid.New(),
 		headers:  optionalHeaders,
 		canceler: newCanceler,
 		sentMsgs: make(chan []byte),
 		rcvMsgs:  make(chan []byte),
 	}
+}
+
+type sseAddr struct {
+	network string
+	addr    string
+}
+
+func (se sseAddr) String() string {
+	return se.addr
+}
+
+func (se sseAddr) Network() string {
+	return se.network
 }
 
 func (se *SSESocket) ID() nxid.ID {
@@ -265,14 +400,36 @@ func (se *SSESocket) LocalAddr() net.Addr {
 	return se.localAddr
 }
 
-func (se *SSESocket) Send(bytes []byte, duration time.Duration) error {
-	atomic.AddInt64(&se.sent, 1)
-	return nil
+func (se *SSESocket) Send(msg []byte, timeout time.Duration) error {
+	var timeoutChan <-chan time.Time
+	if timeout > 0 {
+		timeoutChan = time.After(timeout)
+	}
+
+	select {
+	case se.sentMsgs <- msg:
+		return nil
+	case <-timeoutChan: // nil channel will be ignored
+		return nerror.New("message delivery timeout")
+	case <-se.ctx.Done():
+		return nerror.WrapOnly(se.ctx.Err())
+	}
 }
 
-func (se *SSESocket) SendRead(bytes []byte, duration time.Duration) error {
-	atomic.AddInt64(&se.received, 1)
-	return nil
+func (se *SSESocket) SendRead(msg []byte, timeout time.Duration) error {
+	var timeoutChan <-chan time.Time
+	if timeout > 0 {
+		timeoutChan = time.After(timeout)
+	}
+
+	select {
+	case se.rcvMsgs <- msg:
+		return nil
+	case <-timeoutChan: // nil channel will be ignored
+		return nerror.New("message delivery timeout")
+	case <-se.ctx.Done():
+		return nerror.WrapOnly(se.ctx.Err())
+	}
 }
 
 func (se *SSESocket) Wait() {
@@ -290,12 +447,15 @@ func (se *SSESocket) Start() error {
 		return nerror.New("ResponseWriter object is not a http.Flusher")
 	}
 
+	se.res.WriteHeader(http.StatusOK)
+
 	// Set the headers related to event streaming.
 	se.res.Header().Set("Content-Type", "text/event-stream")
 	se.res.Header().Set("Cache-Control", "no-cache")
 	se.res.Header().Set("Connection", "keep-alive")
 	se.res.Header().Set("Transfer-Encoding", "chunked")
 	se.res.Header().Set("Access-Control-Allow-Origin", "*")
+	se.res.Header().Set(ClientIdentificationHeader, se.clientId)
 
 	if se.headers != nil {
 		se.headers(se.res.Header())
@@ -321,6 +481,7 @@ doLoop:
 		case <-se.ctx.Done():
 			break doLoop
 		case msg := <-se.rcvMsgs:
+			atomic.AddInt64(&se.received, 1)
 			njson.Log(se.logger).New().
 				Message("received new data from client").
 				Bytes("data", msg).
@@ -336,11 +497,39 @@ doLoop:
 	}
 }
 
+func (se *SSESocket) sendWrite(builder *strings.Builder, msg []byte) error {
+	builder.Reset()
+	builder.WriteString(SSEStreamHeader)
+	builder.WriteString("\n")
+	builder.WriteString("data: ")
+	builder.Write(msg)
+	builder.WriteString("\n\n")
+
+	njson.Log(se.logger).New().
+		Info().
+		Message("sending new data into writer").
+		String("data", builder.String()).
+		End()
+
+	if sentCount, writeErr := se.res.Write(nunsafe.String2Bytes(builder.String())); writeErr != nil {
+		njson.Log(se.logger).New().
+			Error().
+			Message("failed to write data to http response writer").
+			String("error", nerror.WrapOnly(writeErr).Error()).
+			Int("written", sentCount).
+			End()
+		return writeErr
+	}
+	return nil
+}
+
 func (se *SSESocket) manageWrites(flusher http.Flusher) {
 	defer se.waiter.Done()
 
 	var requestContext = se.req.Context()
 	var builder strings.Builder
+
+	flusher.Flush()
 
 doLoop:
 	for {
@@ -350,24 +539,13 @@ doLoop:
 		case <-se.ctx.Done():
 			break doLoop
 		case msg := <-se.sentMsgs:
-			builder.Reset()
-			builder.WriteString(SSEStreamHeader)
-			builder.WriteString("\n")
-			builder.WriteString("data: ")
-			builder.Write(msg)
-			builder.WriteString("\n\n")
+			atomic.AddInt64(&se.sent, 1)
 
-			njson.Log(se.logger).New().
-				Info().
-				Message("sending new data into writer").
-				String("data", builder.String()).
-				End()
-
-			if _, writeErr := se.res.Write(nunsafe.String2Bytes(builder.String())); writeErr != nil {
+			if err := se.sendWrite(&builder, msg); err != nil {
 				njson.Log(se.logger).New().
 					Error().
-					Message("failed to write data to http response writer").
-					String("error", nerror.WrapOnly(writeErr).Error()).
+					Message("write failed").
+					String("error", err.Error()).
 					End()
 			}
 

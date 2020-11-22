@@ -50,8 +50,8 @@ func TestGorillaClient(t *testing.T) {
 		Ctx:      controlCtx,
 		Logger:   logger,
 		MaxRetry: 5,
-		RetryFn: func(last time.Duration) time.Duration {
-			return last + (time.Millisecond * 100)
+		RetryFn: func(last int) time.Duration {
+			return time.Duration(last) + (time.Millisecond * 100)
 		},
 		Endpoint: DefaultEndpoint(wsConnAddr, 2*time.Second),
 		Handler: func(b []byte, from sabuhp.Socket) error {
@@ -101,13 +101,15 @@ func TestGorillaClientReconnect(t *testing.T) {
 	require.NotNil(t, httpServer)
 	require.NotEmpty(t, wsConnAddr)
 
+	defer httpServer.Close()
+
 	var message = make(chan []byte, 1)
 	var client, clientErr = GorillaClient(SocketConfig{
 		Ctx:      controlCtx,
 		Logger:   logger,
 		MaxRetry: 5,
-		RetryFn: func(last time.Duration) time.Duration {
-			return last + (time.Millisecond * 100)
+		RetryFn: func(last int) time.Duration {
+			return time.Duration(last) + (time.Millisecond * 100)
 		},
 		Endpoint: DefaultEndpoint(wsConnAddr, 1*time.Second),
 		Handler: func(b []byte, from sabuhp.Socket) error {
@@ -170,6 +172,8 @@ func TestGorillaHub(t *testing.T) {
 	require.NotNil(t, httpServer)
 	require.NotNil(t, wsConn)
 
+	defer httpServer.Close()
+
 	testingutils.SendMessage(t, wsConn, []byte("alex"))
 
 	var received = testingutils.ReceiveWSMessage(t, wsConn)
@@ -213,6 +217,8 @@ func TestGorillaHub_FailedMessage(t *testing.T) {
 	require.NotNil(t, httpServer)
 	require.NotNil(t, wsConn)
 
+	defer httpServer.Close()
+
 	testingutils.SendMessage(t, wsConn, []byte("alex"))
 
 	var received, err = testingutils.GetWSMessage(t, wsConn)
@@ -250,6 +256,8 @@ func TestGorillaHub_StatAfterClosure(t *testing.T) {
 	var httpServer, wsConn = testingutils.NewWSServer(t, wsUpgrader)
 	require.NotNil(t, httpServer)
 	require.NotNil(t, wsConn)
+
+	defer httpServer.Close()
 
 	testingutils.SendMessage(t, wsConn, []byte("alex"))
 

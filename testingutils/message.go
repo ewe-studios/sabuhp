@@ -24,6 +24,10 @@ func EncodedMsg(codec sabuhp.Codec, topic string, message string, fromAddr strin
 	})
 }
 
+func DecodeMsg(codec sabuhp.Codec, data []byte) (*sabuhp.Message, error) {
+	return codec.Decode(data)
+}
+
 func ReceiveMsg(t *testing.T, ws *websocket.Conn, codec sabuhp.Codec) (*sabuhp.Message, error) {
 	t.Helper()
 

@@ -9,7 +9,7 @@ import (
 	"github.com/influx6/npkg/njson"
 )
 
-type RetryFunc func(last time.Duration) time.Duration
+type RetryFunc func(last int) time.Duration
 
 type Logger interface {
 	njson.Logger

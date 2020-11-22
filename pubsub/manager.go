@@ -4,10 +4,16 @@ import (
 	"context"
 	"time"
 
+	"github.com/influx6/npkg/nunsafe"
+
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nxid"
 	"github.com/influx6/sabuhp"
+)
+
+var (
+	DefaultMaxWaitToSend = 5 * time.Second
 )
 
 // Manager implements a concept which allows separation of actual
@@ -50,7 +56,7 @@ func (b *ManagerConfig) ensure() {
 		panic("PubConfig.Codec is required")
 	}
 	if b.MaxWaitToSend <= 0 {
-		b.MaxWaitToSend = time.Second * 5
+		b.MaxWaitToSend = DefaultMaxWaitToSend
 	}
 }
 
@@ -230,6 +236,13 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 				}))
 				return sabuhp.WrapErr(msgBytesErr, false)
 			}
+
+			gp.config.Logger.Log(njson.MJSON("encoded message", func(event npkg.Encoder) {
+				event.String("message", nunsafe.Bytes2String(msgBytes))
+				event.String("hub_id", gp.config.ID.String())
+				event.String("socket_id", socket.ID().String())
+				event.Object("socket_stat", socket.Stat())
+			}))
 
 			if sendErr := socket.Send(msgBytes, gp.config.MaxWaitToSend); sendErr != nil {
 				gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {

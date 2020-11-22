@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/influx6/npkg/nunsafe"
+
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg"
@@ -171,7 +173,7 @@ type Message struct {
 	// concrete object for which this message is to communicate
 	// such a payload may not be able to be serialized and only
 	// serves the purpose of a local runtime communication.
-	LocalPayload Payload
+	LocalPayload Payload `json:"-"`
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
@@ -214,7 +216,7 @@ func (m *Message) WithParams(params map[string]string) *Message {
 func (m *Message) EncodeObject(encoder npkg.ObjectEncoder) {
 	encoder.String("topic", m.Topic)
 	encoder.String("from_addr", m.FromAddr)
-	encoder.Bytes("Payload", m.Payload)
+	encoder.String("Payload", nunsafe.Bytes2String(m.Payload))
 	encoder.StringMap("meta_data", m.Metadata)
 	encoder.String("local_payload", fmt.Sprintf("%#v", m.LocalPayload))
 }

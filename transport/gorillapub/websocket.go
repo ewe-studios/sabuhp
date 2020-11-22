@@ -354,11 +354,10 @@ type SocketConfig struct {
 }
 
 func (s *SocketConfig) clientConnect(ctx context.Context) error {
-	var lastDuration time.Duration
 	var retryCount int
 	for {
-		lastDuration = s.RetryFn(lastDuration)
-		<-time.After(lastDuration)
+		var nextDuration = s.RetryFn(retryCount)
+		<-time.After(nextDuration)
 
 		var conn, res, err = s.Endpoint.Dial(ctx)
 		if err != nil && retryCount < s.MaxRetry {
