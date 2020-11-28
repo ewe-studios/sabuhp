@@ -76,7 +76,8 @@ func (h *HttpService) Add() {
 	h.mux.trie.Insert(searchRoute, WithHandler(
 		h.mux.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
-				if len(h.methods) > 0 && indexOfList(h.methods, request.Method) == -1 {
+				var method = strings.ToLower(request.Method)
+				if len(h.methods) > 0 && indexOfList(h.methods, method) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
