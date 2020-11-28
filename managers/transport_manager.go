@@ -53,7 +53,7 @@ func (tm *TransportManager) Send(message *sabuhp.Message, transport sabuhp.Trans
 	var logStack = njson.Log(tm.logger)
 	defer njson.ReleaseLogStack(logStack)
 
-	logStack.New().Info().
+	logStack.New().LInfo().
 		Message("message received for topic").
 		String("topic", message.Topic).
 		End()
@@ -70,13 +70,13 @@ func (tm *TransportManager) Send(message *sabuhp.Message, transport sabuhp.Trans
 		return sabuhp.WrapErr(nerror.New("channel has no listeners for topic %q", message.Topic), false)
 	}
 
-	logStack.New().Info().
+	logStack.New().LInfo().
 		Message("notifying subscription of message").
 		String("topic", message.Topic).
 		End()
 
 	channel.Notify(message, transport)
-	logStack.New().Info().
+	logStack.New().LInfo().
 		Message("notified subscription of message").
 		String("topic", message.Topic).
 		End()
@@ -147,7 +147,7 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 	var logStack = njson.Log(tm.logger)
 	defer njson.ReleaseLogStack(logStack)
 
-	logStack.New().Info().
+	logStack.New().LInfo().
 		Message("adding subscription for topic").
 		String("topic", sub.topic).
 		End()
@@ -191,7 +191,7 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 
 		newChannel.Run()
 
-		logStack.New().Info().
+		logStack.New().LInfo().
 			Message("removing subscription transportManager for topic").
 			String("topic", sub.topic).
 			End()
@@ -202,6 +202,11 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 	tm.chl.Unlock()
 
 	newChannel.Add(sub)
+
+	logStack.New().LInfo().
+		Message("added subscription for topic").
+		String("topic", sub.topic).
+		End()
 
 	return sub
 }
@@ -289,7 +294,7 @@ func (sc *subscriptionChannel) Remove(info subInfo) {
 
 		delete(sc.subscriptions, info.id)
 
-		logStack.New().Info().
+		logStack.New().LInfo().
 			Message("removing subscriber from topic").
 			String("topic", sc.topic).
 			String("id", info.id.String()).
@@ -315,7 +320,7 @@ func (sc *subscriptionChannel) Add(info *subInfo) {
 			sc.subscriptions[info.id] = info.handler
 		}
 
-		logStack.New().Info().
+		logStack.New().LInfo().
 			Message("added subscriber to topic").
 			String("topic", sc.topic).
 			String("id", info.id.String()).
@@ -341,7 +346,7 @@ func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Tran
 	var logStack = njson.Log(sc.logger)
 	defer njson.ReleaseLogStack(logStack)
 
-	logStack.New().Info().
+	logStack.New().LInfo().
 		Message("received new message").
 		Object("message", msg).
 		String("topic", sc.topic).
@@ -356,7 +361,7 @@ func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Tran
 			func(subscriber sabuhp.TransportResponse, m *sabuhp.Message) {
 				defer func() {
 					if panicInfo := recover(); panicInfo != nil {
-						logStack.New().Panic().
+						logStack.New().LPanic().
 							Message("message handler panic during handling").
 							Object("message", m).
 							String("topic", sc.topic).
@@ -385,7 +390,7 @@ func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Tran
 	case sc.commands <- doDistribution:
 		return
 	case <-sc.ctx.Done():
-		logStack.New().Warn().
+		logStack.New().LWarn().
 			Message("failed to deliver message to handlers").
 			Object("message", msg).
 			String("topic", sc.topic).
@@ -398,13 +403,13 @@ func (sc *subscriptionChannel) Run() {
 	var logStack = njson.Log(sc.logger)
 	defer njson.ReleaseLogStack(logStack)
 
-	logStack.New().Info().
+	logStack.New().LInfo().
 		Message("starting subscription management loop").
 		String("topic", sc.topic).
 		End()
 
 	defer func() {
-		logStack.New().Info().
+		logStack.New().LInfo().
 			Message("ending subscription management loop").
 			String("topic", sc.topic).
 			End()

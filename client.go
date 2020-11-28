@@ -38,7 +38,7 @@ func (c *CodecWriter) Send(msg *Message, timeout time.Duration) error {
 	if encodeErr != nil {
 		var wrappedErr = nerror.WrapOnly(encodeErr)
 		njson.Log(c.Logger).New().
-			Error().
+			LError().
 			Message("encoding message").
 			String("error", wrappedErr.Error()).
 			Object("data", msg).
@@ -49,7 +49,7 @@ func (c *CodecWriter) Send(msg *Message, timeout time.Duration) error {
 	if sendErr := c.Client.Send(encoded, timeout); sendErr != nil {
 		var wrappedErr = nerror.WrapOnly(encodeErr)
 		njson.Log(c.Logger).New().
-			Error().
+			LError().
 			Message("failed to send encoded message message").
 			String("encoded", nunsafe.Bytes2String(encoded)).
 			String("error", wrappedErr.Error()).

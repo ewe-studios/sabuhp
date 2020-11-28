@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/influx6/sabuhp/testingutils"
 
@@ -13,34 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMailer(t *testing.T) {
+func TestLocalMailer(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
-
-	var listeners = map[string][]sabuhp.TransportResponse{}
-
-	var transport = &testingutils.TransportImpl{
-		ConnFunc: func() sabuhp.Conn {
-			return nil
-		},
-		ListenFunc: func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
-			listeners[topic] = append(listeners[topic], handler)
-			return &testingutils.NoPubSubChannel{}
-		},
-		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
-			for _, handler := range listeners[data.Topic] {
-				handler.Handle(data, nil)
-			}
-			return nil
-		},
-		SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
-			var targetListeners = listeners[data.Topic]
-			if len(targetListeners) > 0 {
-				targetListeners[0].Handle(data, nil)
-			}
-			return nil
-		},
-	}
-
 	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
@@ -49,11 +22,10 @@ func TestMailer(t *testing.T) {
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var pubsub = NewMailer(
+	var pubsub = NewLocalMailer(
 		ctx,
 		10,
 		logger,
-		transport,
 	)
 
 	var sendWaiter sync.WaitGroup

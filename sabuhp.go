@@ -120,6 +120,15 @@ func (h HandlerFunc) Handle(rw http.ResponseWriter, r *http.Request, p Params) {
 	h(rw, r, p)
 }
 
+// HttpMatcher embodies a matcher which indicates if the
+// request exclusively belongs to it, hence allowing it
+// to divert a giving request to itself.
+type HttpMatcher interface {
+	Handler
+
+	Match(http.ResponseWriter, *http.Request, Params)
+}
+
 type (
 	// Wrapper is just a type of `func(TransportResponse) TransportResponse`
 	// which is a common type definition for net/http middlewares.

@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/influx6/npkg"
+
 	"github.com/influx6/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
@@ -75,28 +77,28 @@ type Escalation struct {
 	OffendingMessage *sabuhp.Message
 }
 
-type WorkerEscalationHandler func(escalation *Escalation, wk *WorkerGroup)
+type WorkerEscalationNotification func(escalation *Escalation, wk *WorkerGroup)
 
 // WorkerConfig contains necessary properties required by a Worker
 //
 // An important notice to be given is to ensure any blocking operation in the
-// WorkerConfig.EscalationHandler is shot into a goroutine, else this will
+// WorkerConfig.EscalationNotification is shot into a goroutine, else this will
 // block the WorkerGroup's internal run loop. The responsibility is shifted to the
 // user to provide a more concise, expected behaviour, hence the user should be aware.
 type WorkerConfig struct {
-	ActionName          string
-	Addr                string
-	MessageBufferSize   int
-	Action              Action
-	MinWorker           int
-	MaxWorkers          int
-	Transport           sabuhp.Transport
-	Behaviour           BehaviourType
-	Instance            InstanceType
-	Context             context.Context
-	EscalationHandler   WorkerEscalationHandler
-	MaxIdleness         time.Duration
-	MessageDeliveryWait time.Duration
+	ActionName             string
+	Addr                   string
+	MessageBufferSize      int
+	Action                 Action
+	MinWorker              int
+	MaxWorkers             int
+	Transport              sabuhp.Transport
+	Behaviour              BehaviourType
+	Instance               InstanceType
+	Context                context.Context
+	EscalationNotification WorkerEscalationNotification
+	MaxIdleness            time.Duration
+	MessageDeliveryWait    time.Duration
 }
 
 func (wc *WorkerConfig) ensure() {
@@ -112,8 +114,8 @@ func (wc *WorkerConfig) ensure() {
 	if wc.Action == nil {
 		panic("WorkerConfig.Action must have provided")
 	}
-	if wc.EscalationHandler == nil {
-		panic("WorkerConfig.EscalationHandler must have provided")
+	if wc.EscalationNotification == nil {
+		panic("WorkerConfig.WorkerEscalationNotification must have provided")
 	}
 
 	if wc.MessageBufferSize <= 0 {
@@ -194,6 +196,16 @@ func NewWorkGroup(config WorkerConfig) *WorkerGroup {
 	return &w
 }
 
+type WorkerStats []WorkerStat
+
+func (items WorkerStats) EncodeList(encoder npkg.ListEncoder) {
+	for _, stat := range items {
+		func(item WorkerStat) {
+			encoder.AddObject(item)
+		}(stat)
+	}
+}
+
 type WorkerStat struct {
 	Addr                    string
 	MaxWorkers              int
@@ -210,6 +222,24 @@ type WorkerStat struct {
 	TotalIdledWorkers       int
 	Instance                InstanceType
 	BehaviourType           BehaviourType
+}
+
+func (w WorkerStat) EncodeObject(encoder npkg.ObjectEncoder) {
+	encoder.String("addr", w.Addr)
+	encoder.Int("total_panics", w.TotalPanics)
+	encoder.Int("total_idled_workers", w.TotalIdledWorkers)
+	encoder.Int("total_killed_workers", w.TotalKilledWorkers)
+	encoder.Int("total_created_workers", w.TotalCreatedWorkers)
+	encoder.Int("total_current_workers", w.TotalCurrentWorkers)
+	encoder.Int("available_worker_capacity", w.AvailableWorkerCapacity)
+	encoder.Int("total_restarts", w.TotalRestarts)
+	encoder.Int("total_escalations", w.TotalEscalations)
+	encoder.Int("total_message_received", w.TotalMessageReceived)
+	encoder.Int("total_message_processed", w.TotalMessageProcessed)
+	encoder.Int("max_workers", w.MaxWorkers)
+	encoder.Int("min_workers", w.MinWorkers)
+	encoder.Int("instance_type", int(w.Instance))
+	encoder.Int("behaviour_type", int(w.BehaviourType))
 }
 
 func (w *WorkerGroup) Stats() WorkerStat {
@@ -423,7 +453,7 @@ manageLoop:
 				w.enterRestart()
 
 				esc.GroupProtocol = RestartProtocol
-				w.config.EscalationHandler(&esc, w)
+				w.config.EscalationNotification(&esc, w)
 				break manageLoop
 			case StopAllAndEscalate:
 				esc.PendingMessages = w.jobs
@@ -431,7 +461,7 @@ manageLoop:
 
 				w.cancelDo.Do(func() {
 					defer w.ctxCancelFn()
-					w.config.EscalationHandler(&esc, w)
+					w.config.EscalationNotification(&esc, w)
 				})
 				break manageLoop
 			case DoNothing:

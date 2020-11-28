@@ -25,7 +25,7 @@ func createWorkerConfig(ctx context.Context, action Action, buffer int, max int)
 		Action:              action,
 		MaxWorkers:          max,
 		MessageDeliveryWait: time.Millisecond * 100,
-		EscalationHandler: func(escalation *Escalation, wk *WorkerGroup) {
+		EscalationNotification: func(escalation *Escalation, wk *WorkerGroup) {
 
 		},
 	}
@@ -135,7 +135,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 
 	config.MinWorker = 2
 	config.Behaviour = RestartAll
-	config.EscalationHandler = func(escalation *Escalation, wk *WorkerGroup) {
+	config.EscalationNotification = func(escalation *Escalation, wk *WorkerGroup) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, escalation.Data)
 		require.NotNil(t, escalation.OffendingMessage)
@@ -186,7 +186,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 
 	config.MinWorker = 2
 	config.Behaviour = StopAllAndEscalate
-	config.EscalationHandler = func(escalation *Escalation, wk *WorkerGroup) {
+	config.EscalationNotification = func(escalation *Escalation, wk *WorkerGroup) {
 		require.NotNil(t, escalation)
 		require.NotNil(t, escalation.Data)
 		require.NotNil(t, escalation.OffendingMessage)

@@ -35,7 +35,6 @@ func TestMailbox_StartAndStop(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 
@@ -53,7 +52,6 @@ func TestMailbox_StartAndStopWithCancel(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 
@@ -75,7 +73,6 @@ func TestMailbox_MessageDelivery(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 
@@ -111,7 +108,6 @@ func TestMailbox_2Subscribers(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 
@@ -156,7 +152,6 @@ func TestMailbox_3Subscribers_Channel3_Unsubscribed(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 
@@ -221,7 +216,6 @@ func TestMailbox_3Subscribers_Channel2_Unsubscribed(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 
@@ -286,7 +280,6 @@ func TestMailbox_3Subscribers_Channel1_Unsubscribed(t *testing.T) {
 		"hello",
 		logger,
 		1,
-		mailer,
 		transport,
 	)
 

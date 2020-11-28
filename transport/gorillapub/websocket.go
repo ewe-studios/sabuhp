@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,6 +49,10 @@ const (
 	DefaultMaxMessageSize = 4096
 )
 
+var (
+	websocketHeadMessage = []byte("Websocket Endpoint!\n")
+)
+
 type CustomHeader func(r *http.Request) http.Header
 
 func HttpUpgrader(
@@ -57,6 +62,13 @@ func HttpUpgrader(
 	custom CustomHeader,
 ) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
+		if strings.ToLower(request.Method) == "head" {
+			writer.Header().Add("X-Service-Type", "Websocket")
+			writer.Header().Add("X-Service-Name", "SabuHP STREAMS")
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		var customHeaders http.Header
 		if custom != nil {
 			customHeaders = custom(request)

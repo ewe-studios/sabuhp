@@ -86,6 +86,8 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		}
 		return nil
 	}
+
+	var addedChannel = make(chan struct{}, 1)
 	pubb.ChannelFunc = func(topic string, callback sabuhp.TransportResponse) sabuhp.Channel {
 		var noChannel testingutils.NoPubSubChannel
 		channels = append(channels, Sub{
@@ -93,6 +95,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 			Callback: callback,
 			Channel:  &noChannel,
 		})
+		addedChannel <- struct{}{}
 		return &noChannel
 	}
 
@@ -116,6 +119,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 
 	hub.Start()
 
+	<-addedChannel
 	require.Len(t, channels, 1)
 
 	require.NoError(t, pubb.SendToAll(&sabuhp.Message{

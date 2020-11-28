@@ -165,7 +165,7 @@ func (ar *WorkerTemplateRegistry) Register(template WorkerRequest) {
 	ar.templates[template.ActionName] = template
 }
 
-type EscalationHandler func(escalation Escalation, hub *ActionHub)
+type EscalationNotification func(escalation Escalation, hub *ActionHub)
 
 // ActionHub is a worker pool supervisor which sits to manage
 // the execution of functions deployed for processing of commands
@@ -176,7 +176,7 @@ type ActionHub struct {
 	WorkRegistry   *WorkerTemplateRegistry
 	Context        context.Context
 	CancelFn       context.CancelFunc
-	EscalationFunc EscalationHandler
+	EscalationFunc EscalationNotification
 
 	ender              *sync.Once
 	starter            *sync.Once
@@ -196,7 +196,7 @@ type ActionHub struct {
 // NewActionHub returns a new instance of a ActionHub.
 func NewActionHub(
 	ctx context.Context,
-	escalationHandler EscalationHandler,
+	escalationHandler EscalationNotification,
 	templates *WorkerTemplateRegistry,
 	pubsub sabuhp.Transport,
 	logger sabuhp.Logger,
@@ -336,11 +336,13 @@ func (ah *ActionHub) init() {
 func (ah *ActionHub) startManagement() {
 	ah.waiter.Add(1)
 
-	// register all auto-topics/actions
-	ah.createAutoActionWorkers()
+	go func() {
+		// register all auto-topics/actions
+		ah.createAutoActionWorkers()
 
-	// manage
-	go ah.manage()
+		// manage
+		ah.manage()
+	}()
 }
 
 func (ah *ActionHub) manage() {
@@ -438,19 +440,19 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *MasterWorkerGroup) {
 	var slaveName = fmt.Sprintf("%s/slaves/%s", masterGroup.Master.config.ActionName, req.ActionName)
 	var workerConfig = WorkerConfig{
-		ActionName:          slaveName,
-		Addr:                slaveName,
-		MessageBufferSize:   req.MessageBufferSize,
-		Action:              req.Action,
-		MinWorker:           req.MinWorker,
-		MaxWorkers:          req.MaxWorkers,
-		Transport:           ah.Pubsub,
-		Behaviour:           RestartAll,
-		Instance:            ScalingInstances,
-		Context:             masterGroup.Master.Ctx(),
-		EscalationHandler:   ah.handleEscalation(masterGroup),
-		MaxIdleness:         req.MaxIdleness,
-		MessageDeliveryWait: req.MessageDeliveryWait,
+		ActionName:             slaveName,
+		Addr:                   slaveName,
+		MessageBufferSize:      req.MessageBufferSize,
+		Action:                 req.Action,
+		MinWorker:              req.MinWorker,
+		MaxWorkers:             req.MaxWorkers,
+		Transport:              ah.Pubsub,
+		Behaviour:              RestartAll,
+		Instance:               ScalingInstances,
+		Context:                masterGroup.Master.Ctx(),
+		EscalationNotification: ah.handleEscalation(masterGroup),
+		MaxIdleness:            req.MaxIdleness,
+		MessageDeliveryWait:    req.MessageDeliveryWait,
 	}
 
 	workerConfig.ensure()
@@ -481,11 +483,11 @@ func (ah *ActionHub) createMasterGroup(req WorkerRequest) *MasterWorkerGroup {
 	}
 
 	var workerConfig = WorkerConfig{
-		ActionName:        req.ActionName,
-		Transport:         ah.Pubsub,
-		Context:           ah.Context,
-		Addr:              req.PubSubTopic,
-		EscalationHandler: ah.handleEscalation(masterGroup),
+		ActionName:             req.ActionName,
+		Transport:              ah.Pubsub,
+		Context:                ah.Context,
+		Addr:                   req.PubSubTopic,
+		EscalationNotification: ah.handleEscalation(masterGroup),
 	}
 
 	// create master worker.
@@ -546,7 +548,7 @@ func (ah *ActionHub) handleMasterEscalation(
 	}
 }
 
-func (ah *ActionHub) handleEscalation(masterGroup *MasterWorkerGroup) WorkerEscalationHandler {
+func (ah *ActionHub) handleEscalation(masterGroup *MasterWorkerGroup) WorkerEscalationNotification {
 	return func(escalation *Escalation, group *WorkerGroup) {
 		ah.handleMasterEscalation(escalation, group, masterGroup)
 	}

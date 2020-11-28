@@ -200,7 +200,7 @@ func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
 	)
 	if err != nil {
 		njson.Log(sc.logger).New().
-			Error().
+			LError().
 			Message("failed to send request request").
 			String("error", nerror.WrapOnly(err).Error()).
 			End()
@@ -208,7 +208,7 @@ func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
 	}
 
 	njson.Log(sc.logger).New().
-		Info().
+		LInfo().
 		Message("sent SSE http request").
 		Bytes("msg", msg).
 		String("url", req.URL.String()).
@@ -221,7 +221,7 @@ func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
 	var responseBody = bytes.NewBuffer(make([]byte, 0, 128))
 	if _, readErr := io.Copy(responseBody, response.Body); readErr != nil {
 		njson.Log(sc.logger).New().
-			Error().
+			LError().
 			Message("failed to read response").
 			Bytes("msg", msg).
 			String("url", req.URL.String()).
@@ -235,7 +235,7 @@ func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
 
 	if closeErr := response.Body.Close(); closeErr != nil {
 		njson.Log(sc.logger).New().
-			Error().
+			LError().
 			Message("failed to close response body").
 			String("error", nerror.WrapOnly(err).Error()).
 			End()
@@ -272,7 +272,7 @@ doLoop:
 		var line, lineErr = reader.ReadString('\n')
 		if lineErr != nil {
 			njson.Log(sc.logger).New().
-				Error().
+				LError().
 				Message("failed to read more data").
 				String("error", nerror.WrapOnly(lineErr).Error()).
 				End()
@@ -292,7 +292,7 @@ doLoop:
 			// deliver to handler.
 			if data.Len() != 0 {
 				njson.Log(sc.logger).New().
-					Info().
+					LInfo().
 					Message("received complete data").
 					String("data", data.String()).
 					End()
@@ -301,7 +301,7 @@ doLoop:
 				dataLine = bytes.TrimPrefix(dataLine, spaceBytes)
 				if handleErr := sc.handler(dataLine, sc); handleErr != nil {
 					njson.Log(sc.logger).New().
-						Error().
+						LError().
 						Message("failed to handle message").
 						String("error", nerror.WrapOnly(handleErr).Error()).
 						End()
@@ -364,7 +364,7 @@ func (sc *SSEClient) reconnect() {
 		}
 		if err != nil && retryCount >= sc.maxRetries {
 			njson.Log(sc.logger).New().
-				Error().
+				LError().
 				Message("failed to create request").
 				String("error", nerror.WrapOnly(err).Error()).
 				End()

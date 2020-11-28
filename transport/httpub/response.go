@@ -227,7 +227,7 @@ func (m *MethodHandler) ServeHTTP(r *Request) Handler {
 		w.Headers = Header{}
 		w.Headers.Set("Allow", m.methodsAllowedStr)
 		w.Code = http.StatusMethodNotAllowed
-		w.Body = bytes.NewBufferString(http.StatusText(http.StatusMethodNotAllowed))
+		w.Body = NewBufferCloser(bytes.NewBufferString(http.StatusText(http.StatusMethodNotAllowed)))
 		return w
 	})
 }
@@ -406,4 +406,61 @@ func (p *xmlProcessor) Dispatch(w http.ResponseWriter, v interface{}) error {
 	w.Header().Set("Content-Type", withCharset("text/xml"))
 	_, err = w.Write(result)
 	return err
+}
+
+// MatchableContextHandler defines a condition which matches expected error
+// for performing giving action.
+type MatchableContextHandler interface {
+	Match(error) bool
+	Handle(r *Request, params Params) Response
+}
+
+// Matchable returns MatchableContextHandler using provided arguments.
+func Matchable(err error, fn Handler) MatchableContextHandler {
+	return &errorConditionImpl{
+		Err: err,
+		Fn:  fn,
+	}
+}
+
+// errorConditionImpl defines a type which sets the error that occurs and the handler to be called
+// for such an error.
+type errorConditionImpl struct {
+	Err error
+	Fn  Handler
+}
+
+// Handler calls the internal http.Handler with provided Ctx returning error.
+func (ec errorConditionImpl) Handle(r *Request, params Params) Response {
+	return ec.Fn.Handle(r, params)
+}
+
+// Match validates the provided error matches expected error.
+func (ec errorConditionImpl) Match(err error) bool {
+	return ec.Err == err
+}
+
+// MatchableFunction returns MatchableContextHandler using provided arguments.
+func MatchableFunction(err func(error) bool, fn Handler) MatchableContextHandler {
+	return fnErrorCondition{
+		Err: err,
+		Fn:  fn,
+	}
+}
+
+// fnErrorCondition defines a type which sets the error that occurs and the handler to be called
+// for such an error.
+type fnErrorCondition struct {
+	Fn  Handler
+	Err func(error) bool
+}
+
+// http.Handler calls the internal http.Handler with provided Ctx returning error.
+func (ec fnErrorCondition) Handle(r *Request, params Params) Response {
+	return ec.Fn.Handle(r, params)
+}
+
+// Match validates the provided error matches expected error.
+func (ec fnErrorCondition) Match(err error) bool {
+	return ec.Err(err)
 }

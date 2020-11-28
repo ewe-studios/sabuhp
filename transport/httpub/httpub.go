@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+
+	"github.com/influx6/npkg/nunsafe"
 )
 
 // Transport defines what we expect from a handler of requests.
@@ -110,7 +112,7 @@ type Response struct {
 
 	// Body is the buffer to which the Handler's Write calls are sent.
 	// If nil, the Writes are silently discarded.
-	Body *bytes.Buffer
+	Body io.WriteCloser
 
 	// Flushed is whether the Handler called Flush.
 	Flushed bool
@@ -119,11 +121,23 @@ type Response struct {
 	Err error
 }
 
+type BufferCloser struct {
+	*bytes.Buffer
+}
+
+func NewBufferCloser(bw *bytes.Buffer) *BufferCloser {
+	return &BufferCloser{bw}
+}
+
+func (bc *BufferCloser) Close() error {
+	return nil
+}
+
 // NewResponse returns an initialized Response.
-func NewResponse() *Response {
+func NewResponse(w io.WriteCloser) *Response {
 	return &Response{
 		Headers: make(map[string][]string),
-		Body:    new(bytes.Buffer),
+		Body:    w,
 		Code:    0,
 	}
 }
@@ -141,7 +155,7 @@ func (rw *Response) Header() map[string][]string {
 // Write always succeeds and writes to rw.Body, if not nil.
 func (rw *Response) Write(buf []byte) (int, error) {
 	if rw.Body != nil {
-		rw.Body.Write(buf)
+		return rw.Body.Write(buf)
 	}
 	return len(buf), nil
 }
@@ -149,7 +163,7 @@ func (rw *Response) Write(buf []byte) (int, error) {
 // WriteString always succeeds and writes to rw.Body, if not nil.
 func (rw *Response) WriteString(str string) (int, error) {
 	if rw.Body != nil {
-		rw.Body.WriteString(str)
+		return rw.Body.Write(nunsafe.String2Bytes(str))
 	}
 	return len(str), nil
 }
