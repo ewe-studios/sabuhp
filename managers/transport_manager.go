@@ -41,15 +41,25 @@ func (tm *TransportManager) Conn() sabuhp.Conn {
 
 func (tm *TransportManager) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
 	data.Delivery = sabuhp.SendToOne
+	if data.OverridingTransport != nil {
+		return tm.Send(data, data.OverridingTransport)
+	}
 	return tm.Transport.SendToOne(data, timeout)
 }
 
 func (tm *TransportManager) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
 	data.Delivery = sabuhp.SendToAll
+	if data.OverridingTransport != nil {
+		return tm.Send(data, data.OverridingTransport)
+	}
 	return tm.Transport.SendToAll(data, timeout)
 }
 
 func (tm *TransportManager) Send(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+	return tm.SendWithTimeout(message, transport, 0)
+}
+
+func (tm *TransportManager) SendWithTimeout(message *sabuhp.Message, transport sabuhp.Transport, timeout time.Duration) sabuhp.MessageErr {
 	var logStack = njson.Log(tm.logger)
 	defer njson.ReleaseLogStack(logStack)
 
@@ -75,7 +85,7 @@ func (tm *TransportManager) Send(message *sabuhp.Message, transport sabuhp.Trans
 		String("topic", message.Topic).
 		End()
 
-	channel.Notify(message, transport)
+	channel.NotifyWithTimeout(message, transport, timeout)
 	logStack.New().LInfo().
 		Message("notified subscription of message").
 		String("topic", message.Topic).
@@ -343,6 +353,10 @@ func (sc *subscriptionChannel) Add(info *subInfo) {
 }
 
 func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Transport) {
+	sc.NotifyWithTimeout(msg, transport, 0)
+}
+
+func (sc *subscriptionChannel) NotifyWithTimeout(msg *sabuhp.Message, transport sabuhp.Transport, timeout time.Duration) {
 	var logStack = njson.Log(sc.logger)
 	defer njson.ReleaseLogStack(logStack)
 
@@ -386,7 +400,19 @@ func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Tran
 		}
 	}
 
+	var timeoutChan <-chan time.Time
+	if timeout > 0 {
+		timeoutChan = time.After(timeout)
+	}
+
 	select {
+	case <-timeoutChan:
+		logStack.New().LWarn().
+			Message("failed to deliver message to handlers due to timeout").
+			Object("message", msg).
+			String("topic", sc.topic).
+			End()
+		return
 	case sc.commands <- doDistribution:
 		return
 	case <-sc.ctx.Done():

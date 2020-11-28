@@ -169,12 +169,6 @@ type Message struct {
 	// Payload is the payload for giving message.
 	Payload []byte
 
-	// LocalPayload is the payload attached which can be a
-	// concrete object for which this message is to communicate
-	// such a payload may not be able to be serialized and only
-	// serves the purpose of a local runtime communication.
-	LocalPayload Payload `json:"-"`
-
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
 
@@ -182,6 +176,19 @@ type Message struct {
 	// sender and provide some values to keyed expectation, unlike metadata
 	// it has specific input in the message.
 	Params map[string]string
+
+	// LocalPayload is the payload attached which can be a
+	// concrete object for which this message is to communicate
+	// such a payload may not be able to be serialized and only
+	// serves the purpose of a local runtime communication.
+	LocalPayload Payload `json:"-" messagepack:"-" gob:"-"`
+
+	// OverridingTransport allows special messages which may not fall under
+	// the same behaviour as normal messages which are delivered over a
+	// transport, the general idea is that all handlers will use this
+	// specific transport instead of the default one. This makes this message
+	// a special occurrence, and will be treated as so.
+	OverridingTransport Transport `json:"-" messagepack:"-" gob:"-"`
 }
 
 func NewMessage(topic string, fromAddr string, payload []byte) *Message {
