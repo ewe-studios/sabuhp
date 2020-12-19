@@ -39,19 +39,56 @@ func (tm *TransportManager) Conn() sabuhp.Conn {
 	return tm.Transport.Conn()
 }
 
+// SendToOne implements the Transport interface but handles things in a different
+// way. If the message has an overriding transport from its originator then that is
+// used to send the message, which bypasses all internal channels or subscriptions.
+//
 func (tm *TransportManager) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
+	var logStack = njson.Log(tm.logger)
+	defer njson.ReleaseLogStack(logStack)
+
 	data.Delivery = sabuhp.SendToOne
 	if data.OverridingTransport != nil {
-		return tm.Send(data, data.OverridingTransport)
+		if sendErr := tm.SendWithTimeout(data, data.OverridingTransport, timeout); sendErr != nil {
+			var wrappedErr = nerror.WrapOnly(sendErr)
+			logStack.New().LError().
+				Message("failed to deliver message content to overriding transport").
+				String("topic", data.Topic).
+				String("error", wrappedErr.Error()).
+				Bool("should_ack", sendErr.ShouldAck()).
+				End()
+			return wrappedErr
+		}
+		return nil
 	}
 	return tm.Transport.SendToOne(data, timeout)
 }
 
+// SendToAll implements the Transport interface but handles things in a different
+// way. If the message has an overriding transport from its originator then that is
+// used to send the message first before attempting to deliver message to all other
+// channels matching giving topic.
+//
 func (tm *TransportManager) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
+	var logStack = njson.Log(tm.logger)
+	defer njson.ReleaseLogStack(logStack)
+
 	data.Delivery = sabuhp.SendToAll
 	if data.OverridingTransport != nil {
-		return tm.Send(data, data.OverridingTransport)
+		if sendErr := tm.SendWithTimeout(data, data.OverridingTransport, timeout); sendErr != nil {
+			logStack.New().LError().
+				Message("failed to deliver message content to overriding transport").
+				String("topic", data.Topic).
+				String("error", nerror.WrapOnly(sendErr).Error()).
+				Bool("should_ack", sendErr.ShouldAck()).
+				End()
+		}
+
+		var newData = *data
+		newData.OverridingTransport = nil
+		return tm.Transport.SendToAll(&newData, timeout)
 	}
+
 	return tm.Transport.SendToAll(data, timeout)
 }
 
@@ -367,6 +404,8 @@ func (sc *subscriptionChannel) NotifyWithTimeout(msg *sabuhp.Message, transport 
 		End()
 
 	var doDistribution = func() {
+		var logStack = njson.Log(sc.logger)
+		defer njson.ReleaseLogStack(logStack)
 		logStack.New().Message("notifying all handlers with message").
 			String("topic", sc.topic).
 			End()

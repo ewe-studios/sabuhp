@@ -337,7 +337,7 @@ func redirect(r *Request, uri string, code int) Response {
 	return Response{
 		Headers: h,
 		Code:    code,
-		Body:    bytes.NewBufferString(content),
+		Body:    NewBufferCloser(bytes.NewBufferString(content)),
 	}
 }
 

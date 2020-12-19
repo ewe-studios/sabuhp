@@ -1,24 +1,26 @@
 package radar
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
-	"github.com/influx6/sabuhp/utils"
-
 	"github.com/influx6/sabuhp/managers"
-
-	"github.com/influx6/npkg/njson"
+	"github.com/influx6/sabuhp/transport/hsocks"
 
 	"github.com/influx6/npkg/nerror"
+
 	"github.com/influx6/sabuhp"
 )
 
 type MuxConfig struct {
-	RootPath string
-	Logger   sabuhp.Logger
-	NotFound sabuhp.Handler
-	Manager  *managers.Manager
+	RootPath   string
+	Logger     sabuhp.Logger
+	NotFound   sabuhp.Handler
+	Manager    *managers.Manager
+	Ctx        context.Context
+	Transposer sabuhp.Transposer
+	Headers    sabuhp.HeaderModifications
 }
 
 // Mux is Request multiplexer.
@@ -26,15 +28,16 @@ type MuxConfig struct {
 // a specific TransportHandler which will be registered
 // to the provided transport for handling specific events.
 type Mux struct {
-	config    MuxConfig
-	rootPath  string
-	trie      *Trie
-	logger    sabuhp.Logger
-	NotFound  sabuhp.Handler
-	subRoutes []sabuhp.MessageRouter
-	pre       sabuhp.Wrappers
-	preHttp   sabuhp.HttpWrappers
-	manager   *managers.Manager
+	config       MuxConfig
+	rootPath     string
+	trie         *Trie
+	logger       sabuhp.Logger
+	NotFound     sabuhp.Handler
+	subRoutes    []sabuhp.MessageRouter
+	pre          sabuhp.Wrappers
+	preHttp      sabuhp.HttpWrappers
+	manager      *managers.Manager
+	httpToEvents *hsocks.HttpServlet
 }
 
 func NewMux(config MuxConfig) *Mux {
@@ -45,297 +48,72 @@ func NewMux(config MuxConfig) *Mux {
 		manager:  config.Manager,
 		logger:   config.Logger,
 		NotFound: config.NotFound,
+		httpToEvents: hsocks.ManagedHttpServlet(
+			config.Ctx,
+			config.Logger,
+			config.Transposer,
+			config.Manager,
+			config.Headers,
+		),
 	}
 }
 
-func (m *Mux) Http(route string, methods ...string) *HttpService {
-	return &HttpService{
-		mux:     m,
-		route:   route,
-		methods: toLower(methods),
-	}
-}
-
-type HttpService struct {
-	mux     *Mux
-	methods []string
-	route   string
-	handler sabuhp.Handler
-}
-
-func (h *HttpService) Handler(handler sabuhp.Handler) *HttpService {
-	h.handler = handler
-	return h
-}
-
-func (h *HttpService) Add() {
-	if h.handler == nil {
-		panic("Handler is required")
-	}
-	var searchRoute = h.mux.rootPath + h.route
-	h.mux.trie.Insert(searchRoute, WithHandler(
-		h.mux.preHttp.ForFunc(
+func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
+	var searchRoute = m.rootPath + route
+	methods = toLower(methods)
+	m.trie.Insert(searchRoute, WithHandler(
+		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
-				var method = strings.ToLower(request.Method)
-				if len(h.methods) > 0 && indexOfList(h.methods, method) == -1 {
+				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				h.handler.Handle(writer, request, p)
+				handler.Handle(writer, request, p)
 			},
 		),
 	))
-}
-
-// EventService configures an event which
-// registers accordingly to the underline
-// transport returning appropriate channel.
-//
-// It also allows registering a http endpoint which
-// will generate appropriate message object from the
-// request which will be serviced by the TransportResponse
-// handler registered to the service endpoint.
-//
-// The http.ResponseWriter will be attached as a messages.LocalPayload
-// for cases where the user wishes to send a response back to the client.
-type EventService struct {
-	mux *Mux
-
-	// this are the event attributes
-	event           string
-	responseHandler sabuhp.TransportResponse
-
-	// this are for http redirection.
-	route      string
-	methods    []string
-	transposer sabuhp.Transpose
-}
-
-func (e *EventService) Http(route string, transposer sabuhp.Transpose, methods ...string) {
-	e.route = route
-	e.methods = toLower(methods)
-	e.transposer = transposer
-}
-
-func (e *EventService) Handler(res sabuhp.TransportResponse) {
-	e.responseHandler = e.mux.pre.For(res)
-}
-
-func (e *EventService) Add() sabuhp.Channel {
-	if e.responseHandler == nil {
-		panic("TransportResponse is required")
-	}
-	if len(e.event) == 0 {
-		panic("event is required")
-	}
-	if len(e.route) == 0 {
-		return e.mux.manager.Listen(e.event, e.responseHandler)
-	}
-
-	var searchRoute = e.mux.rootPath + e.route
-	e.mux.trie.Insert(searchRoute, WithHandler(
-		e.mux.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
-				if len(e.methods) > 0 && indexOfList(e.methods, strings.ToLower(request.Method)) == -1 {
-					writer.WriteHeader(http.StatusBadRequest)
-					return
-				}
-
-				// convert request into a message object.
-				var transposedMessage, transposeErr = e.transposer(request, p)
-				if transposeErr != nil {
-					writer.WriteHeader(http.StatusBadRequest)
-					if err := utils.CreateError(
-						writer,
-						transposeErr,
-						"Failed to decode request into message",
-						http.StatusBadRequest,
-					); err != nil {
-						njson.Log(e.mux.logger).New().
-							Message("failed to write message to response writer").
-							String("error", nerror.WrapOnly(err).Error()).
-							String("route", e.route).
-							String("redirect_to", e.event).
-							End()
-					}
-
-					njson.Log(e.mux.logger).New().
-						Message("failed to send message on transport").
-						String("error", nerror.WrapOnly(transposeErr).Error()).
-						String("route", e.route).
-						String("redirect_to", e.event).
-						End()
-				}
-
-				transposedMessage.LocalPayload = sabuhp.HttpResponseWriterAsPayload(writer)
-
-				if err := e.responseHandler.Handle(transposedMessage, e.mux.manager); err != nil {
-					writer.WriteHeader(http.StatusInternalServerError)
-					if err := utils.CreateError(
-						writer,
-						transposeErr,
-						"Failed to decode request into message",
-						http.StatusInternalServerError,
-					); err != nil {
-						njson.Log(e.mux.logger).New().
-							Message("failed to write message to response writer").
-							String("error", nerror.WrapOnly(err).Error()).
-							String("route", e.route).
-							String("redirect_to", e.event).
-							End()
-					}
-
-					njson.Log(e.mux.logger).New().
-						Message("failed to send message on transport").
-						String("error", nerror.WrapOnly(err).Error()).
-						String("route", e.route).
-						String("redirect_to", e.event).
-						End()
-				}
-
-				writer.WriteHeader(http.StatusNoContent)
-			},
-		),
-	))
-
-	return e.mux.manager.Listen(e.event, e.responseHandler)
 }
 
 // Service registers handlers for giving event returning
 // events channel.
-func (m *Mux) Service(eventName string) *EventService {
-	return &EventService{
-		event: eventName,
-		mux:   m,
-	}
+//
+// Understand that closing the channel does not close the http endpoint.
+func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportResponse, methods ...string) sabuhp.Channel {
+	var muxHandler = m.pre.For(handler)
+	var searchRoute = m.rootPath + route
+	methods = toLower(methods)
+	m.trie.Insert(searchRoute, WithHandler(
+		m.preHttp.ForFunc(
+			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, muxHandler)
+			},
+		),
+	))
+	return m.manager.Listen(eventName, muxHandler)
 }
 
 // RedirectTo redirects all requests from http into the pubsub using
 // provided configuration on the HttpToEventService.
-func (m *Mux) RedirectTo(eventName string) *HttpToEventService {
-	return &HttpToEventService{
-		event: eventName,
-		mux:   m,
-	}
-}
-
-type HttpToEventService struct {
-	mux            *Mux
-	event          string
-	methods        []string
-	route          string
-	httpTransposer sabuhp.Transpose
-}
-
-func (h *HttpToEventService) ConvertWith(tr sabuhp.Transpose) {
-	h.httpTransposer = tr
-}
-
-func (h *HttpToEventService) Route(route string) {
-	h.route = route
-}
-
-func (h *HttpToEventService) Method(methods ...string) {
-	h.methods = toLower(methods)
-}
-
-func (h *HttpToEventService) Add() {
-	if len(h.event) == 0 {
-		panic("event is required")
-	}
-	if len(h.route) == 0 {
-		panic("route is required")
-	}
-	var searchRoute = h.mux.rootPath + h.route
-	h.mux.trie.Insert(searchRoute, WithHandler(
-		h.mux.preHttp.ForFunc(
+//
+// Understand that closing the channel does not close the http endpoint.
+func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
+	var searchRoute = m.rootPath + route
+	methods = toLower(methods)
+	m.trie.Insert(searchRoute, WithHandler(
+		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
-				if len(h.methods) > 0 && indexOfList(h.methods, strings.ToLower(request.Method)) == -1 {
+				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				// convert request into a message object.
-				// convert request into a message object.
-				var transposedMessage, transposeErr = h.httpTransposer(request, p)
-				if transposeErr != nil {
-					writer.WriteHeader(http.StatusBadRequest)
-					if err := utils.CreateError(
-						writer,
-						transposeErr,
-						"Failed to decode request into message",
-						http.StatusBadRequest,
-					); err != nil {
-						njson.Log(h.mux.logger).New().
-							Message("failed to write message to response writer").
-							String("error", nerror.WrapOnly(err).Error()).
-							String("route", h.route).
-							String("redirect_to", h.event).
-							End()
-					}
-
-					njson.Log(h.mux.logger).New().
-						Message("failed to send message on transport").
-						String("error", nerror.WrapOnly(transposeErr).Error()).
-						String("route", h.route).
-						String("redirect_to", h.event).
-						End()
-					return
-				}
-
-				transposedMessage.LocalPayload = sabuhp.HttpResponseWriterAsPayload(writer)
-
-				// if we are to redirect this
-				if transposedMessage.Delivery == sabuhp.SendToAll {
-					if err := h.mux.manager.SendToAll(transposedMessage, 0); err != nil {
-						writer.WriteHeader(http.StatusInternalServerError)
-						if err := utils.CreateError(
-							writer,
-							transposeErr, "Failed to decode request into message", http.StatusInternalServerError); err != nil {
-							njson.Log(h.mux.logger).New().
-								Message("failed to send message into transport").
-								String("error", nerror.WrapOnly(err).Error()).
-								String("route", h.route).
-								String("redirect_to", h.event).
-								End()
-						}
-
-						njson.Log(h.mux.logger).New().
-							Message("failed to send message on transport").
-							String("error", nerror.WrapOnly(err).Error()).
-							String("route", h.route).
-							String("redirect_to", h.event).
-							End()
-					}
-					return
-				}
-				if err := h.mux.manager.SendToOne(transposedMessage, 0); err != nil {
-					writer.WriteHeader(http.StatusInternalServerError)
-					if err := utils.CreateError(
-						writer,
-						transposeErr,
-						"Failed to decode request into message",
-						http.StatusInternalServerError,
-					); err != nil {
-						njson.Log(h.mux.logger).New().
-							Message("failed to send message into transport").
-							String("error", nerror.WrapOnly(err).Error()).
-							String("route", h.route).
-							String("redirect_to", h.event).
-							End()
-					}
-
-					njson.Log(h.mux.logger).New().
-						Message("failed to send message on transport").
-						String("error", nerror.WrapOnly(err).Error()).
-						String("route", h.route).
-						String("redirect_to", h.event).
-						End()
-					return
-				}
-
-				writer.WriteHeader(http.StatusNoContent)
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, nil)
 			},
 		),
 	))

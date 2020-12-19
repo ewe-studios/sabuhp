@@ -68,14 +68,14 @@ func main() {
 		log.Fatalf("Closing application due to station initialization: %+q", wrapErr)
 	}
 
-	station.Router().Http("/pop").Handler(sabuhp.HandlerFunc(func(
+	station.Router().Http("/pop", sabuhp.HandlerFunc(func(
 		writer http.ResponseWriter,
 		request *http.Request,
 		params sabuhp.Params,
 	) {
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte("stay forever!"))
-	})).Add()
+	}))
 
 	if err := station.Wait(); err != nil {
 		var wrapErr = nerror.WrapOnly(err)

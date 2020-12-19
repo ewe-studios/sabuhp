@@ -89,7 +89,7 @@ type ServiceConfig struct {
 func (gp *Manager) Config() ServiceConfig {
 	return ServiceConfig{
 		Ctx:       gp.ctx,
-		Handler:   gp.HandleSocketMessage,
+		Handler:   gp.HandleSocketBytesMessage,
 		OnClosure: gp.ManageSocketClosed,
 		OnOpen:    gp.ManageSocketOpened,
 	}
@@ -106,6 +106,10 @@ func (gp *Manager) Ctx() context.Context {
 func (gp *Manager) Stop() {
 	gp.canceler()
 	gp.transportManager.Wait()
+}
+
+func (gp *Manager) Codec() sabuhp.Codec {
+	return gp.config.Codec
 }
 
 func (gp *Manager) Conn() sabuhp.Conn {
@@ -167,11 +171,7 @@ func (gp *Manager) ManageSocketClosed(socket sabuhp.Socket) {
 	}
 }
 
-func (gp *Manager) HandleSocketCatchup(lastId nxid.ID, socket sabuhp.Socket) error {
-	return nil
-}
-
-func (gp *Manager) HandleSocketMessage(message []byte, socket sabuhp.Socket) error {
+func (gp *Manager) HandleSocketBytesMessage(message []byte, socket sabuhp.Socket) error {
 	var msg, msgErr = gp.config.Codec.Decode(message)
 	if msgErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to decoded message", func(event npkg.Encoder) {
@@ -184,6 +184,27 @@ func (gp *Manager) HandleSocketMessage(message []byte, socket sabuhp.Socket) err
 		return msgErr
 	}
 
+	return gp.HandleSocketMessage(msg, socket)
+}
+
+func (gp *Manager) HandleSocketBytesMessageFromOverriding(message []byte, socket sabuhp.Socket, overridingTransport sabuhp.Transport) error {
+	var msg, msgErr = gp.config.Codec.Decode(message)
+	if msgErr != nil {
+		gp.config.Logger.Log(njson.MJSON("failed to decoded message", func(event npkg.Encoder) {
+			event.String("hub_id", gp.config.ID.String())
+			event.String("error", msgErr.Error())
+			event.String("message", string(message))
+			event.String("socket_id", socket.ID().String())
+			event.Object("socket_stat", socket.Stat())
+		}))
+		return msgErr
+	}
+
+	msg.OverridingTransport = overridingTransport
+	return gp.HandleSocketMessage(msg, socket)
+}
+
+func (gp *Manager) HandleSocketMessage(msg *sabuhp.Message, socket sabuhp.Socket) error {
 	var topicString = string(msg.Payload)
 	switch msg.Topic {
 	case sabuhp.SUBSCRIBE:
@@ -209,13 +230,27 @@ func (gp *Manager) HandleSocketMessage(message []byte, socket sabuhp.Socket) err
 
 		gp.transportManager.UnlistenWithId(topicString, socket.ID())
 	default:
+		if msg.Delivery == sabuhp.SendToOne {
+			if sendErr := gp.transportManager.SendToOne(msg, gp.config.MaxWaitToSend); sendErr != nil {
+				gp.config.Logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
+					event.String("hub_id", gp.config.ID.String())
+					event.String("error", sendErr.Error())
+					event.String("socket_id", socket.ID().String())
+					event.Object("socket_stat", socket.Stat())
+				}))
+				return sendErr
+			}
+			return nil
+		}
+
 		if sendErr := gp.transportManager.SendToAll(msg, gp.config.MaxWaitToSend); sendErr != nil {
-			gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
+			gp.config.Logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
 				event.String("hub_id", gp.config.ID.String())
 				event.String("error", sendErr.Error())
 				event.String("socket_id", socket.ID().String())
 				event.Object("socket_stat", socket.Stat())
 			}))
+			return sendErr
 		}
 	}
 	return nil

@@ -49,45 +49,6 @@ func NewSSEHub(
 	return &SSEHub{ctx: ctx, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
 }
 
-func (se *SSEHub) Delete(
-	handler MessageHandler,
-	id nxid.ID,
-	route string,
-	lastEventIds ...string,
-) (*SSEClient, error) {
-	return se.For(handler, id, "Delete", route, nil, lastEventIds...)
-}
-
-func (se *SSEHub) Patch(
-	handler MessageHandler,
-	id nxid.ID,
-	route string,
-	body io.Reader,
-	lastEventIds ...string,
-) (*SSEClient, error) {
-	return se.For(handler, id, "PATCH", route, body, lastEventIds...)
-}
-
-func (se *SSEHub) Post(
-	handler MessageHandler,
-	id nxid.ID,
-	route string,
-	body io.Reader,
-	lastEventIds ...string,
-) (*SSEClient, error) {
-	return se.For(handler, id, "POST", route, body, lastEventIds...)
-}
-
-func (se *SSEHub) Put(
-	handler MessageHandler,
-	id nxid.ID,
-	route string,
-	body io.Reader,
-	lastEventIds ...string,
-) (*SSEClient, error) {
-	return se.For(handler, id, "PUT", route, body, lastEventIds...)
-}
-
 func (se *SSEHub) Get(handler MessageHandler, id nxid.ID, route string, lastEventIds ...string) (*SSEClient, error) {
 	return se.For(handler, id, "GET", route, nil, lastEventIds...)
 }
@@ -171,7 +132,7 @@ func (sc *SSEClient) Wait() {
 	sc.waiter.Wait()
 }
 
-func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
+func (sc *SSEClient) Send(method string, msg []byte, timeout time.Duration) ([]byte, error) {
 	var header = http.Header{}
 	header.Set("Cache-Control", "no-cache")
 	header.Set(ClientIdentificationHeader, sc.id.String())
@@ -193,7 +154,7 @@ func (sc *SSEClient) Send(msg []byte, timeout time.Duration) ([]byte, error) {
 	var req, response, err = utils.DoRequest(
 		ctx,
 		sc.client,
-		sc.request.Method,
+		method,
 		sc.request.URL.String(),
 		bytes.NewReader(msg),
 		header,

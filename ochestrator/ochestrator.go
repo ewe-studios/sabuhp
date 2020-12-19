@@ -5,33 +5,26 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/influx6/sabuhp/mbox"
-
-	"github.com/Ewe-Studios/websocket"
-
-	"github.com/influx6/sabuhp/codecs"
-
 	"github.com/go-redis/redis/v8"
-	"github.com/influx6/sabuhp/mbus/redispub"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nxid"
 
-	"golang.org/x/sync/errgroup"
-
-	"github.com/influx6/sabuhp/transport/gorillapub"
-	"github.com/influx6/sabuhp/transport/ssepub"
-
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp/radar"
-	"github.com/influx6/sabuhp/transport/httpub/serverpub"
-
-	"github.com/influx6/sabuhp/managers"
-
-	"github.com/influx6/sabuhp/slaves"
+	"github.com/Ewe-Studios/websocket"
 
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/codecs"
+	"github.com/influx6/sabuhp/managers"
+	"github.com/influx6/sabuhp/mbox"
+	"github.com/influx6/sabuhp/mbus/redispub"
+	"github.com/influx6/sabuhp/radar"
+	"github.com/influx6/sabuhp/slaves"
+	"github.com/influx6/sabuhp/transport/gorillapub"
+	"github.com/influx6/sabuhp/transport/httpub/serverpub"
+	"github.com/influx6/sabuhp/transport/ssepub"
 )
 
 var (
@@ -570,18 +563,17 @@ func (s *Station) Init() error {
 	s.httpHealth = httpServer.Health
 	s.httpServer = httpServer
 
-	s.router.Http("/health", "GET", "HEAD").Handler(
-		sabuhp.HandlerFunc(func(
-			writer http.ResponseWriter,
-			request *http.Request,
-			params sabuhp.Params,
-		) {
-			if err := s.httpHealth.Ping(); err != nil {
-				writer.WriteHeader(http.StatusBadGateway)
-				return
-			}
-			writer.WriteHeader(http.StatusOK)
-		})).Add()
+	s.router.Http("/health", sabuhp.HandlerFunc(func(
+		writer http.ResponseWriter,
+		request *http.Request,
+		params sabuhp.Params,
+	) {
+		if err := s.httpHealth.Ping(); err != nil {
+			writer.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+	}), "GET", "HEAD")
 
 	// create worker hub
 	var workerHub, createWorkerHubErr = s.CreateWorkerHub(s.Ctx, s.Logger, s.WorkerRegistry, s.manager)
@@ -611,7 +603,7 @@ func (s *Station) Init() error {
 		})
 
 		if s.RegisterHandlers {
-			s.router.Http("/streams/ws", "GET", "HEAD").Handler(websocketHandler).Add()
+			s.router.Http("/streams/ws", websocketHandler, "GET", "HEAD")
 		}
 
 		s.gwsHub = websocketHub
@@ -626,7 +618,7 @@ func (s *Station) Init() error {
 		}
 
 		if s.RegisterHandlers {
-			s.router.Http("/streams/sse", "GET", "HEAD").Handler(sseHub).Add()
+			s.router.Http("/streams/sse", sseHub, "GET", "HEAD")
 		}
 
 		s.sseHub = sseHub

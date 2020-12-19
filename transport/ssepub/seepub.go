@@ -32,6 +32,8 @@ const (
 	LastEventIdListHeader      = "X-SSE-Last-Event-Ids"
 )
 
+var doubleLine = []byte("\n\n")
+
 var _ sabuhp.Handler = (*SSEServer)(nil)
 
 func ManagedSSEServer(
@@ -327,6 +329,7 @@ type SSESocket struct {
 	req        *http.Request
 	res        http.ResponseWriter
 	sentMsgs   chan []byte
+	sendWriter chan *sabuhp.SocketWriterTo
 	rcvMsgs    chan []byte
 	ctx        context.Context
 	canceler   context.CancelFunc
@@ -366,11 +369,12 @@ func NewSSESocket(
 			network: "tcp",
 			addr:    r.Host,
 		},
-		xid:      nxid.New(),
-		headers:  optionalHeaders,
-		canceler: newCanceler,
-		sentMsgs: make(chan []byte),
-		rcvMsgs:  make(chan []byte),
+		xid:        nxid.New(),
+		headers:    optionalHeaders,
+		canceler:   newCanceler,
+		sentMsgs:   make(chan []byte),
+		rcvMsgs:    make(chan []byte),
+		sendWriter: make(chan *sabuhp.SocketWriterTo),
 	}
 }
 
@@ -416,13 +420,41 @@ func (se *SSESocket) Send(msg []byte, timeout time.Duration) error {
 		timeoutChan = time.After(timeout)
 	}
 
+	var reqCtx = se.req.Context()
 	select {
 	case se.sentMsgs <- msg:
 		return nil
 	case <-timeoutChan: // nil channel will be ignored
 		return nerror.New("message delivery timeout")
+	case <-reqCtx.Done():
+		return nerror.WrapOnly(reqCtx.Err())
 	case <-se.ctx.Done():
 		return nerror.WrapOnly(se.ctx.Err())
+	}
+}
+
+func (se *SSESocket) SendWriter(msgWriter io.WriterTo, timeout time.Duration) sabuhp.ErrorWaiter {
+	var timeoutChan <-chan time.Time
+	if timeout > 0 {
+		timeoutChan = time.After(timeout)
+	}
+
+	var socketWriter = sabuhp.NewSocketWriterTo(msgWriter)
+	select {
+	case <-se.req.Context().Done():
+		socketWriter.Abort(se.req.Context().Err())
+		se.canceler()
+		return socketWriter
+	case <-timeoutChan: // nil channel will be ignored
+		socketWriter.Abort(nerror.New("message delivery timeout"))
+		se.canceler()
+		return socketWriter
+	case <-se.ctx.Done():
+		socketWriter.Abort(nerror.New("not receiving anymore messages"))
+		se.canceler()
+		return socketWriter
+	case se.sendWriter <- socketWriter:
+		return socketWriter
 	}
 }
 
@@ -432,11 +464,14 @@ func (se *SSESocket) SendRead(msg []byte, timeout time.Duration) error {
 		timeoutChan = time.After(timeout)
 	}
 
+	var reqCtx = se.req.Context()
 	select {
 	case se.rcvMsgs <- msg:
 		return nil
 	case <-timeoutChan: // nil channel will be ignored
 		return nerror.New("message delivery timeout")
+	case <-reqCtx.Done():
+		return nerror.WrapOnly(reqCtx.Err())
 	case <-se.ctx.Done():
 		return nerror.WrapOnly(se.ctx.Err())
 	}
@@ -501,7 +536,7 @@ doLoop:
 				Bytes("data", msg).
 				End()
 
-			if handleErr := se.manager.HandleSocketMessage(msg, se); handleErr != nil {
+			if handleErr := se.manager.HandleSocketBytesMessage(msg, se); handleErr != nil {
 				stack.New().
 					Message("failed handle socket message").
 					String("error", nerror.WrapOnly(handleErr).Error()).
@@ -540,6 +575,52 @@ func (se *SSESocket) sendWrite(builder *strings.Builder, msg []byte) error {
 	return nil
 }
 
+func (se *SSESocket) sendWriterTo(writer *sabuhp.SocketWriterTo) error {
+	var builder strings.Builder
+	builder.Reset()
+	builder.WriteString(SSEStreamHeader)
+	builder.WriteString("\n")
+	builder.WriteString("data: ")
+
+	var stack = njson.Log(se.logger)
+	defer njson.ReleaseLogStack(stack)
+
+	stack.New().
+		LInfo().
+		Message("sending new data into writer").
+		String("data", builder.String()).
+		End()
+
+	if sentCount, writeErr := se.res.Write(nunsafe.String2Bytes(builder.String())); writeErr != nil {
+		stack.New().
+			LError().
+			Message("failed to write data to http response writer").
+			String("error", nerror.WrapOnly(writeErr).Error()).
+			Int("written", sentCount).
+			End()
+		return writeErr
+	}
+	if sentCount, writeErr := writer.WriteTo(se.res); writeErr != nil {
+		stack.New().
+			LError().
+			Message("failed to write data from WriterTo to http response writer").
+			String("error", nerror.WrapOnly(writeErr).Error()).
+			Int64("written", sentCount).
+			End()
+		return writeErr
+	}
+	if sentCount, writeErr := se.res.Write(doubleLine); writeErr != nil {
+		stack.New().
+			LError().
+			Message("failed to write data ending newlines to response writer").
+			String("error", nerror.WrapOnly(writeErr).Error()).
+			Int("written", sentCount).
+			End()
+		return writeErr
+	}
+	return nil
+}
+
 func (se *SSESocket) manageWrites(flusher http.Flusher) {
 	defer se.waiter.Done()
 
@@ -558,6 +639,18 @@ doLoop:
 			break doLoop
 		case <-se.ctx.Done():
 			break doLoop
+		case writer := <-se.sendWriter:
+			atomic.AddInt64(&se.sent, 1)
+			if err := se.sendWriterTo(writer); err != nil {
+				stack.New().
+					LError().
+					Message("write failed").
+					String("error", err.Error()).
+					End()
+			}
+
+			// flush content into response writer.
+			flusher.Flush()
 		case msg := <-se.sentMsgs:
 			atomic.AddInt64(&se.sent, 1)
 

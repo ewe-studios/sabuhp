@@ -1,8 +1,12 @@
 package sabuhp
 
 import (
+	"io"
 	"net"
+	"sync"
 	"time"
+
+	"github.com/influx6/npkg/nerror"
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nxid"
@@ -37,10 +41,74 @@ func (g SocketStat) EncodeObject(encoder npkg.ObjectEncoder) {
 	encoder.String("remote_addr_network", g.RemoteAddr.Network())
 }
 
+type SocketWriterTo struct {
+	waiter   *sync.WaitGroup
+	target   io.WriterTo
+	ml       sync.Mutex
+	writing  bool
+	abortErr error
+}
+
+func NewSocketWriterTo(w io.WriterTo) *SocketWriterTo {
+	var waiter sync.WaitGroup
+	waiter.Add(1)
+	return &SocketWriterTo{
+		waiter:   &waiter,
+		target:   w,
+		writing:  false,
+		abortErr: nil,
+	}
+}
+
+func (se *SocketWriterTo) Wait() error {
+	se.waiter.Wait()
+	se.ml.Lock()
+	if se.abortErr != nil {
+		se.ml.Unlock()
+		return se.abortErr
+	}
+	return nil
+}
+
+func (se *SocketWriterTo) WriteTo(w io.Writer) (int64, error) {
+	se.ml.Lock()
+	if se.abortErr != nil {
+		se.ml.Unlock()
+		return 0, nerror.New("Aborted")
+	}
+	se.writing = true
+	se.ml.Unlock()
+
+	var written, writeErr = se.target.WriteTo(w)
+	se.waiter.Done()
+	if writeErr != nil {
+		se.ml.Lock()
+		se.abortErr = writeErr
+		se.ml.Unlock()
+		return written, nerror.WrapOnly(writeErr)
+	}
+	return written, nil
+}
+
+func (se *SocketWriterTo) Abort(err error) {
+	se.ml.Lock()
+	if !se.writing {
+		se.writing = false
+		se.abortErr = err
+	}
+	se.ml.Unlock()
+	se.waiter.Done()
+}
+
+type ErrorWaiter interface {
+	Wait() error
+}
+
 type Socket interface {
 	ID() nxid.ID
 	Stat() SocketStat
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
 	Send([]byte, time.Duration) error
+	SendWriter(io.WriterTo, time.Duration) ErrorWaiter
 }

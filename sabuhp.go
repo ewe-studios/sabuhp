@@ -96,9 +96,13 @@ func (t TransportResponseFunc) Handle(message *Message, tr Transport) MessageErr
 	return t(message, tr)
 }
 
-// Transpose transforms a http request into a Message to be
+type HeaderModifications func(header http.Header)
+
+// Transposer transforms a http request into a Message to be
 // delivered.
-type Transpose func(req *http.Request, params Params) (*Message, error)
+type Transposer interface {
+	Transpose(req *http.Request, params Params) (*Message, error)
+}
 
 // Matcher is the interface that all Matchers should be implemented
 // in order to be registered into the Mux via the `Mux#AddRequestHandler/Match/MatchFunc` functions.
