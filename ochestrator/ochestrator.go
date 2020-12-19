@@ -62,6 +62,20 @@ func GobCodec(
 	return &codecs.GobCodec{}, nil
 }
 
+type TransposerCreator func(
+	ctx context.Context,
+	logger sabuhp.Logger,
+	codec sabuhp.Codec,
+) (sabuhp.Transposer, error)
+
+func DefaultTransposer(
+	_ context.Context,
+	logger sabuhp.Logger,
+	codec sabuhp.Codec,
+) (sabuhp.Transposer, error) {
+	return sabuhp.NewCodecTransposer(codec, logger), nil
+}
+
 type TransportCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
@@ -113,16 +127,18 @@ type RouterCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	manager *managers.Manager,
+	transposer sabuhp.Transposer,
 ) (*radar.Mux, error)
 
 func DefaultRouter(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	manager *managers.Manager,
+	transposer sabuhp.Transposer,
 ) (*radar.Mux, error) {
 	return DefaultRouterWithNotFound(ctx, logger, manager, sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
 		http.NotFound(writer, request)
-	}))
+	}), transposer)
 }
 
 func DefaultRouterWithNotFound(
@@ -130,11 +146,14 @@ func DefaultRouterWithNotFound(
 	logger sabuhp.Logger,
 	manager *managers.Manager,
 	notFound sabuhp.Handler,
+	transposer sabuhp.Transposer,
 ) (*radar.Mux, error) {
 	return radar.NewMux(radar.MuxConfig{
-		RootPath: "",
-		Logger:   logger,
-		Manager:  manager,
+		RootPath:   "",
+		Ctx:        ctx,
+		Logger:     logger,
+		Manager:    manager,
+		Transposer: transposer,
 		NotFound: sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
 			var logStack = njson.Log(logger)
 			defer njson.ReleaseLogStack(logStack)
@@ -334,16 +353,18 @@ type Station struct {
 	WorkerRegistry *slaves.WorkerTemplateRegistry
 
 	// creator functions
-	CreateCodec     CodecCreator
-	CreateTransport TransportCreator
-	CreateManager   ManagerCreator
-	CreateWorkerHub WorkerHubCreator
-	CreateRouter    RouterCreator
-	CreateServer    HttpServerCreator
-	CreateSSEServer SSEServerCreator
-	CreateWebsocket GorillaHubCreator
+	CreateCodec      CodecCreator
+	CreateTransposer TransposerCreator
+	CreateTransport  TransportCreator
+	CreateManager    ManagerCreator
+	CreateWorkerHub  WorkerHubCreator
+	CreateRouter     RouterCreator
+	CreateServer     HttpServerCreator
+	CreateSSEServer  SSEServerCreator
+	CreateWebsocket  GorillaHubCreator
 
 	httpHealth     serverpub.HealthPinger
+	transposer     sabuhp.Transposer
 	errGroup       *errgroup.Group
 	httpServer     *serverpub.Server
 	workers        *slaves.ActionHub
@@ -393,6 +414,7 @@ func DefaultStation(
 	station.CreateServer = DefaultHTTPServer
 	station.CreateSSEServer = DefaultSSEServer
 	station.CreateWebsocket = DefaultGorillaHub
+	station.CreateTransposer = DefaultTransposer
 	return station
 }
 
@@ -414,6 +436,7 @@ func DefaultLocalTransportStation(
 	station.CreateServer = DefaultHTTPServer
 	station.CreateSSEServer = DefaultSSEServer
 	station.CreateWebsocket = DefaultGorillaHub
+	station.CreateTransposer = DefaultTransposer
 	return station
 }
 
@@ -492,8 +515,14 @@ func (s *Station) Init() error {
 	if createCodecErr != nil {
 		return nerror.WrapOnly(createCodecErr)
 	}
-
 	s.codec = codec
+
+	// create transposer for station
+	var transposer, createTransposerErr = s.CreateTransposer(s.Ctx, s.Logger, codec)
+	if createTransposerErr != nil {
+		return nerror.WrapOnly(createTransposerErr)
+	}
+	s.transposer = transposer
 
 	// create transport
 	var transport, createTransportErr = s.CreateTransport(s.Ctx, s.Logger, s.codec)
@@ -531,7 +560,7 @@ func (s *Station) Init() error {
 	})
 
 	// create resource router
-	var router, createRouterErr = s.CreateRouter(s.Ctx, s.Logger, s.manager)
+	var router, createRouterErr = s.CreateRouter(s.Ctx, s.Logger, s.manager, s.transposer)
 	if createRouterErr != nil {
 		return nerror.WrapOnly(createRouterErr)
 	}

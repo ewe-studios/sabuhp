@@ -9,11 +9,12 @@ import (
 )
 
 type CodecTransposer struct {
-	Codec Codec
+	Codec  Codec
+	Logger Logger
 }
 
-func NewCodecTransposer(codec Codec) *CodecTransposer {
-	return &CodecTransposer{Codec: codec}
+func NewCodecTransposer(codec Codec, logger Logger) *CodecTransposer {
+	return &CodecTransposer{Codec: codec, Logger: logger}
 }
 
 func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message, error) {

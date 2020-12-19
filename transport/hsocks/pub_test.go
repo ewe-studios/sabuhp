@@ -63,7 +63,7 @@ func TestNewHub(t *testing.T) {
 		return nil
 	}))
 
-	var sseServer = ManagedHttpServlet(controlCtx, logger, sabuhp.NewCodecTransposer(codec), manager, nil)
+	var sseServer = ManagedHttpServlet(controlCtx, logger, sabuhp.NewCodecTransposer(codec, logger), manager, nil)
 	require.NotNil(t, sseServer)
 
 	var httpServer = httptest.NewServer(sseServer)
