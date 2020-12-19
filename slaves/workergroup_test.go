@@ -14,12 +14,12 @@ import (
 )
 
 var testName = "test_action"
+var transport = &testingutils.NoPubSub{}
 
 func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) WorkerConfig { //nolint:lll
 	return WorkerConfig{
 		Context:             ctx,
 		MessageBufferSize:   buffer,
-		Transport:           &testingutils.NoPubSub{},
 		Addr:                testName,
 		ActionName:          testName,
 		Action:              action,
@@ -57,7 +57,7 @@ func TestNewWorkGroup(t *testing.T) {
 			FromAddr: "component_1",
 			Payload:  textPayload,
 			Metadata: nil,
-		}))
+		}, transport))
 	}
 
 	count.Wait()
@@ -105,7 +105,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 			FromAddr: "component_1",
 			Payload:  textPayload,
 			Metadata: nil,
-		}))
+		}, transport))
 	}
 
 	count.Wait()
@@ -157,7 +157,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 		Payload:  textPayload,
 		Metadata: nil,
 	}
-	require.NoError(t, group.HandleMessage(msg))
+	require.NoError(t, group.HandleMessage(msg, transport))
 
 	<-notify
 
@@ -206,7 +206,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 		FromAddr: "component_1",
 		Payload:  textPayload,
 		Metadata: nil,
-	}))
+	}, transport))
 
 	<-notify
 

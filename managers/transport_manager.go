@@ -49,6 +49,11 @@ func (tm *TransportManager) SendToOne(data *sabuhp.Message, timeout time.Duratio
 
 	data.Delivery = sabuhp.SendToOne
 	if data.OverridingTransport != nil {
+		logStack.New().LInfo().
+			Message("delivery message to overriding transport").
+			String("topic", data.Topic).
+			End()
+
 		if sendErr := tm.SendWithTimeout(data, data.OverridingTransport, timeout); sendErr != nil {
 			var wrappedErr = nerror.WrapOnly(sendErr)
 			logStack.New().LError().
@@ -61,6 +66,11 @@ func (tm *TransportManager) SendToOne(data *sabuhp.Message, timeout time.Duratio
 		}
 		return nil
 	}
+
+	logStack.New().LInfo().
+		Message("delivery message to one listener through transport").
+		String("topic", data.Topic).
+		End()
 	return tm.Transport.SendToOne(data, timeout)
 }
 
@@ -75,6 +85,11 @@ func (tm *TransportManager) SendToAll(data *sabuhp.Message, timeout time.Duratio
 
 	data.Delivery = sabuhp.SendToAll
 	if data.OverridingTransport != nil {
+		logStack.New().LInfo().
+			Message("delivery message to overriding transport first").
+			String("topic", data.Topic).
+			End()
+
 		if sendErr := tm.SendWithTimeout(data, data.OverridingTransport, timeout); sendErr != nil {
 			logStack.New().LError().
 				Message("failed to deliver message content to overriding transport").
@@ -85,10 +100,20 @@ func (tm *TransportManager) SendToAll(data *sabuhp.Message, timeout time.Duratio
 			return sendErr
 		}
 
+		logStack.New().LInfo().
+			Message("delivery message to remaining listeners through transport").
+			String("topic", data.Topic).
+			End()
+
 		var newData = *data
 		newData.OverridingTransport = nil
 		return tm.Transport.SendToAll(&newData, timeout)
 	}
+
+	logStack.New().LInfo().
+		Message("delivery message to listeners through transport").
+		String("topic", data.Topic).
+		End()
 
 	return tm.Transport.SendToAll(data, timeout)
 }
@@ -476,7 +501,13 @@ func (sc *subscriptionChannel) NotifyWithTimeout(msg *sabuhp.Message, transport 
 						String("topic", sc.topic).
 						String("error", nerror.WrapOnly(handleErr).Error()).
 						End()
+					return
 				}
+
+				logStack.New().Message("handled message delivery successfully").
+					Object("message", m).
+					String("topic", sc.topic).
+					End()
 			}(sub, msg)
 		}
 	}

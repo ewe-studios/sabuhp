@@ -92,7 +92,6 @@ type WorkerConfig struct {
 	Action                 Action
 	MinWorker              int
 	MaxWorkers             int
-	Transport              sabuhp.Transport
 	Behaviour              BehaviourType
 	Instance               InstanceType
 	Context                context.Context
@@ -145,6 +144,11 @@ func (wc *WorkerConfig) ensure() {
 	}
 }
 
+type WorkRequest struct {
+	Message   *sabuhp.Message
+	Transport sabuhp.Transport
+}
+
 // WorkerGroup embodies a small action based workgroup which at their default
 // state are scaling functions for execution across their maximum allowed
 // range. WorkerGroup provide other settings like SingleInstance where only
@@ -173,7 +177,7 @@ type WorkerGroup struct {
 	endWorker         chan struct{}
 	stoppedWorker     chan struct{}
 	escalationChannel chan Escalation
-	jobs              chan *sabuhp.Message
+	jobs              chan WorkRequest
 	rm                sync.Mutex
 	restarting        bool
 }
@@ -191,7 +195,7 @@ func NewWorkGroup(config WorkerConfig) *WorkerGroup {
 	w.endWorker = make(chan struct{})
 	w.stoppedWorker = make(chan struct{})
 	w.availableSlots = int64(config.MaxWorkers)
-	w.jobs = make(chan *sabuhp.Message, config.MessageBufferSize)
+	w.jobs = make(chan WorkRequest, config.MessageBufferSize)
 	w.escalationChannel = make(chan Escalation, config.MaxWorkers)
 	return &w
 }
@@ -304,14 +308,17 @@ func (w *WorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *WorkerGroup) HandleMessage(message *sabuhp.Message) error {
+func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.Transport) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
 	// else block till message is accepted.
 	select {
 	case <-w.context.Done():
-	case w.jobs <- message:
+	case w.jobs <- WorkRequest{
+		Message:   message,
+		Transport: t,
+	}:
 		return nil
 	case <-time.After(w.config.MessageDeliveryWait):
 		break
@@ -327,7 +334,10 @@ func (w *WorkerGroup) HandleMessage(message *sabuhp.Message) error {
 	select {
 	case <-w.context.Done():
 		return nerror.New("failed to handle message from %q", w.config.ActionName)
-	case w.jobs <- message:
+	case w.jobs <- WorkRequest{
+		Message:   message,
+		Transport: t,
+	}:
 		return nil
 	}
 }
@@ -341,7 +351,7 @@ func (w *WorkerGroup) doWork() {
 	atomic.AddInt64(&w.activeWorkers, 1)
 	atomic.AddInt64(&w.availableSlots, -1)
 
-	var currentMessage *sabuhp.Message
+	var currentMessage WorkRequest
 
 	defer func() {
 		// signal active and available slots.
@@ -367,7 +377,7 @@ func (w *WorkerGroup) doWork() {
 			// send to escalation channel.
 			var esc = Escalation{
 				Err:              nerror.New("panic occurred"),
-				OffendingMessage: currentMessage,
+				OffendingMessage: currentMessage.Message,
 				WorkerProtocol:   PanicProtocol,
 				Data:             err,
 			}
@@ -399,7 +409,6 @@ func (w *WorkerGroup) doWork() {
 
 	var ctx = w.context
 	var action = w.config.Action
-	var pubsub = w.config.Transport
 	var maxIdleness = w.config.MaxIdleness
 
 	for {
@@ -411,7 +420,7 @@ func (w *WorkerGroup) doWork() {
 			return
 		case currentMessage = <-w.jobs:
 			atomic.AddInt64(&w.totalMessages, 1)
-			action.Do(w.context, w.config.Addr, currentMessage, pubsub)
+			action.Do(w.context, w.config.Addr, currentMessage.Message, currentMessage.Transport)
 			atomic.AddInt64(&w.totalProcessed, 1)
 
 			if w.config.Instance == OneTimeInstance {
@@ -456,7 +465,14 @@ manageLoop:
 				w.config.EscalationNotification(&esc, w)
 				break manageLoop
 			case StopAllAndEscalate:
-				esc.PendingMessages = w.jobs
+				var totalLeft = len(w.jobs)
+				var pending = make(chan *sabuhp.Message, totalLeft)
+				for i := 0; i < totalLeft; i++ {
+					var current = <-w.jobs
+					pending <- current.Message
+				}
+
+				esc.PendingMessages = pending
 				esc.GroupProtocol = KillAndEscalateProtocol
 
 				w.cancelDo.Do(func() {

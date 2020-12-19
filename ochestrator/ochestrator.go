@@ -112,6 +112,7 @@ func DefaultRedisTransportWithOptions(
 	if redisTransportErr != nil {
 		return nil, nerror.WrapOnly(redisTransportErr)
 	}
+	redisTransport.Start()
 	return redisTransport, nil
 }
 

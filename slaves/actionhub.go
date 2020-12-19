@@ -395,7 +395,7 @@ func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 				return sabuhp.WrapErr(nerror.New("worker group not found"), false)
 			}
 
-			if err := workerGroup.Master.HandleMessage(data); err != nil {
+			if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
 				logger.Log(njson.JSONB(func(event npkg.Encoder) {
 					event.String("error", err.Error())
 					event.Bool("auto_action", true)
@@ -422,7 +422,7 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 	var logger = ah.Logger
 	var workerGroup = ah.createMasterGroup(req)
 	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
-		if err := workerGroup.Master.HandleMessage(data); err != nil {
+		if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
 				event.String("channel_topic", req.PubSubTopic)
@@ -446,7 +446,6 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 		Action:                 req.Action,
 		MinWorker:              req.MinWorker,
 		MaxWorkers:             req.MaxWorkers,
-		Transport:              ah.Pubsub,
 		Behaviour:              RestartAll,
 		Instance:               ScalingInstances,
 		Context:                masterGroup.Master.Ctx(),
@@ -462,7 +461,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	masterGroup.Slaves[slaveName] = slaveWorkerGroup
 
 	var workerChannel = ah.Pubsub.Listen(slaveName, sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
-		if err := slaveWorkerGroup.HandleMessage(data); err != nil {
+		if err := slaveWorkerGroup.HandleMessage(data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
 				event.String("channel_topic", slaveName)
@@ -484,7 +483,6 @@ func (ah *ActionHub) createMasterGroup(req WorkerRequest) *MasterWorkerGroup {
 
 	var workerConfig = WorkerConfig{
 		ActionName:             req.ActionName,
-		Transport:              ah.Pubsub,
 		Context:                ah.Context,
 		Addr:                   req.PubSubTopic,
 		EscalationNotification: ah.handleEscalation(masterGroup),

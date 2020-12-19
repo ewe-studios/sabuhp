@@ -6,17 +6,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/influx6/sabuhp/ochestrator"
-
-	"github.com/influx6/npkg/nerror"
-
-	"github.com/influx6/sabuhp/slaves"
-
-	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
-
 	"github.com/influx6/npkg/ndaemon"
+	"github.com/influx6/npkg/nerror"
+	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nxid"
+
+	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/ochestrator"
+	"github.com/influx6/sabuhp/slaves"
 	"github.com/influx6/sabuhp/testingutils"
 )
 
@@ -62,6 +59,9 @@ func main() {
 
 	var workerId = nxid.New()
 	var station = ochestrator.DefaultStation(masterCtx, workerId, ":7800", mainLogger, workerRegistry)
+
+	// use json encoder
+	station.CreateCodec = ochestrator.JsonCodec
 
 	if stationInitErr := station.Init(); stationInitErr != nil {
 		var wrapErr = nerror.WrapOnly(stationInitErr)

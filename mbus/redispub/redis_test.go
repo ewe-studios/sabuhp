@@ -105,8 +105,9 @@ func TestRedis_PubSub_SendToAll(t *testing.T) {
 
 	pb.Start()
 
-	var whyMessage = sabuhp.NewMessage("why", "me", []byte("yes"))
-	var whatMessage = sabuhp.NewMessage("what", "me", []byte("yes"))
+	var content = []byte("\"yes\"")
+	var whyMessage = sabuhp.NewMessage("why", "me", content)
+	var whatMessage = sabuhp.NewMessage("what", "me", content)
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)

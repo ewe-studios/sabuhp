@@ -531,8 +531,10 @@ doLoop:
 
 func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.Message) {
 	defer func() {
+		var panicErr = nerror.New("panic occurred in redis.handleMessage")
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred handling pubsub message", func(event npkg.Encoder) {
+				event.Error("error", panicErr)
 				event.String("message", message.String())
 				event.String("panic_data", fmt.Sprintf("%#v", panicInfo))
 				event.String("panic_data", fmt.Sprintf("%+s", panicInfo))
@@ -540,7 +542,14 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 		}
 	}()
 
-	var decodedMessage, decodedErr = r.config.Codec.Decode(nunsafe.String2Bytes(message.Payload))
+	r.logger.Log(njson.MJSON("received message to decode", func(event npkg.Encoder) {
+		event.String("topic", message.Channel)
+		event.String("pattern", message.Pattern)
+		event.String("payload", message.Payload)
+	}))
+
+	var payloadBytes = nunsafe.String2Bytes(message.Payload)
+	var decodedMessage, decodedErr = r.config.Codec.Decode(payloadBytes)
 	if decodedErr != nil {
 		r.logger.Log(njson.MJSON("failed to decode message", func(event npkg.Encoder) {
 			event.String("topic", message.Channel)
