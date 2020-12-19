@@ -68,6 +68,10 @@ func main() {
 		log.Fatalf("Closing application due to station initialization: %+q", wrapErr)
 	}
 
+	// create a http to event route redirect to an event
+	station.Router().RedirectTo("hello", "/hello")
+
+	// create a normal http route
 	station.Router().Http("/pop", sabuhp.HandlerFunc(func(
 		writer http.ResponseWriter,
 		request *http.Request,

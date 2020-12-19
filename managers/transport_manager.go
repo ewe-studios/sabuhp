@@ -82,6 +82,7 @@ func (tm *TransportManager) SendToAll(data *sabuhp.Message, timeout time.Duratio
 				String("error", nerror.WrapOnly(sendErr).Error()).
 				Bool("should_ack", sendErr.ShouldAck()).
 				End()
+			return sendErr
 		}
 
 		var newData = *data
@@ -203,16 +204,42 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 	if channel, hasChannel := tm.channels[sub.topic]; hasChannel {
 		tm.chl.RUnlock()
 
+		logStack.New().LInfo().
+			Message("found channel for topic").
+			String("topic", sub.topic).
+			End()
+
 		channel.Add(sub)
+
+		logStack.New().LInfo().
+			Message("added subscriber to topic").
+			String("topic", sub.topic).
+			End()
 		return sub
 	}
 	tm.chl.RUnlock()
 
+	logStack.New().LInfo().
+		Message("creating transport channel for topic").
+		String("topic", sub.topic).
+		End()
+
 	// Create listener instruction to transport.
 	var transportChannel = tm.Transport.Listen(sub.topic, sabuhp.TransportResponseFunc(tm.Send))
 
+	logStack.New().LInfo().
+		Message("created transport channel for topic").
+		String("topic", sub.topic).
+		End()
+
 	if transportErr := transportChannel.Err(); transportErr != nil {
 		sub.err = nerror.WrapOnly(transportErr)
+
+		logStack.New().LError().
+			Message("failed to add subscriber to topic").
+			String("topic", sub.topic).
+			Error("error", transportErr).
+			End()
 		return sub
 	}
 
@@ -244,11 +271,26 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 			End()
 	}()
 
+	logStack.New().LInfo().
+		Message("adding new transport channel to map").
+		String("topic", sub.topic).
+		End()
+
 	tm.chl.Lock()
 	tm.channels[sub.topic] = newChannel
 	tm.chl.Unlock()
 
+	logStack.New().LInfo().
+		Message("adding subscription to transport channel").
+		String("topic", sub.topic).
+		End()
+
 	newChannel.Add(sub)
+
+	logStack.New().LInfo().
+		Message("added subscriber to topic").
+		String("topic", sub.topic).
+		End()
 
 	logStack.New().LInfo().
 		Message("added subscription for topic").

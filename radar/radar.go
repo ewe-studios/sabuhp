@@ -98,7 +98,28 @@ func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportRe
 	return m.manager.Listen(eventName, muxHandler)
 }
 
-// RedirectTo redirects all requests from http into the pubsub using
+// RedirectAsPath redirects all requests from giving http route into the pubsub using
+// path as event name .
+//
+// Understand that closing the channel does not close the http endpoint.
+func (m *Mux) RedirectAsPath(route string, methods ...string) {
+	var searchRoute = m.rootPath + route
+	methods = toLower(methods)
+	m.trie.Insert(searchRoute, WithHandler(
+		m.preHttp.ForFunc(
+			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+
+				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, nil)
+			},
+		),
+	))
+}
+
+// RedirectTo redirects all requests giving http route into the pubsub using
 // provided configuration on the HttpToEventService.
 //
 // Understand that closing the channel does not close the http endpoint.

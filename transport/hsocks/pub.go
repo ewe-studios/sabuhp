@@ -427,8 +427,6 @@ func (se *ServletSocket) Start() error {
 		return decodedErr
 	}
 
-	decodedMessage.LocalPayload = sabuhp.HttpResponseWriterAsPayload(se.res)
-
 	// if we have being scoped to specific event name, use that.
 	if se.asEvent != "" {
 		decodedMessage.Topic = se.asEvent

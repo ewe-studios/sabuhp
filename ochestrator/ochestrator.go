@@ -480,6 +480,13 @@ func (s *Station) Transport() sabuhp.Transport {
 	return s.transport
 }
 
+func (s *Station) Transposer() sabuhp.Transposer {
+	if s.codec == nil {
+		panic("Station.Init is not yet called")
+	}
+	return s.transposer
+}
+
 func (s *Station) Codec() sabuhp.Codec {
 	if s.codec == nil {
 		panic("Station.Init is not yet called")
