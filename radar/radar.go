@@ -38,6 +38,7 @@ type Mux struct {
 	preHttp      sabuhp.HttpWrappers
 	manager      *managers.Manager
 	httpToEvents *hsocks.HttpServlet
+	routes       map[string]bool
 }
 
 func NewMux(config MuxConfig) *Mux {
@@ -48,6 +49,7 @@ func NewMux(config MuxConfig) *Mux {
 		manager:  config.Manager,
 		logger:   config.Logger,
 		NotFound: config.NotFound,
+		routes:   map[string]bool{},
 		httpToEvents: hsocks.ManagedHttpServlet(
 			config.Ctx,
 			config.Logger,
@@ -58,9 +60,19 @@ func NewMux(config MuxConfig) *Mux {
 	}
 }
 
+// Routes returns all registered routes on the router.
+func (m *Mux) Routes() []string {
+	var routes = make([]string, 0, len(m.routes))
+	for k := range m.routes {
+		routes = append(routes, k)
+	}
+	return routes
+}
+
 func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
 	var searchRoute = m.rootPath + route
 	methods = toLower(methods)
+	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
@@ -86,6 +98,7 @@ func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = m.rootPath + route
 	methods = toLower(methods)
+	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
@@ -111,6 +124,7 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = m.rootPath + route
 	methods = toLower(methods)
+	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
@@ -133,6 +147,7 @@ func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportRe
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = m.rootPath + route
 	methods = toLower(methods)
+	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
@@ -155,6 +170,7 @@ func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportRe
 func (m *Mux) RedirectAsPath(route string, methods ...string) {
 	var searchRoute = m.rootPath + route
 	methods = toLower(methods)
+	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
@@ -176,6 +192,7 @@ func (m *Mux) RedirectAsPath(route string, methods ...string) {
 func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
 	var searchRoute = m.rootPath + route
 	methods = toLower(methods)
+	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
 			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {

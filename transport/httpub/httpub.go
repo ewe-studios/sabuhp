@@ -10,6 +10,8 @@ import (
 	"net/url"
 
 	"github.com/influx6/npkg/nunsafe"
+
+	"github.com/influx6/sabuhp"
 )
 
 // Transport defines what we expect from a handler of requests.
@@ -19,52 +21,13 @@ type Transport interface {
 	Send(ctx context.Context, request *Request) (Response, error)
 }
 
-type Params map[string]string
-
-func (h Params) Get(k string) string {
-	return h[k]
-}
-
-func (h Params) Set(k string, v string) {
-	h[k] = v
-}
-
-func (h Params) Delete(k string) {
-	delete(h, k)
-}
-
-type Header map[string][]string
-
-func (h Header) Get(k string) string {
-	if values, ok := h[k]; ok {
-		return values[0]
-	}
-	return ""
-}
-
-func (h Header) Values(k string) []string {
-	return h[k]
-}
-
-func (h Header) Add(k string, v string) {
-	h[k] = append(h[k], v)
-}
-
-func (h Header) Set(k string, v string) {
-	h[k] = append([]string{v}, v)
-}
-
-func (h Header) Delete(k string) {
-	delete(h, k)
-}
-
 type Handler interface {
-	Handle(req *Request, params Params) Response
+	Handle(req *Request, params sabuhp.Params) Response
 }
 
-type HandlerFunc func(req *Request, params Params) Response
+type HandlerFunc func(req *Request, params sabuhp.Params) Response
 
-func (h HandlerFunc) Handle(req *Request, params Params) Response {
+func (h HandlerFunc) Handle(req *Request, params sabuhp.Params) Response {
 	return h(req, params)
 }
 
@@ -81,9 +44,9 @@ type Request struct {
 	TLS              bool
 	Method           string
 	URL              *url.URL
-	Cookies          []Cookie
+	Cookies          []sabuhp.Cookie
 	Body             io.ReadCloser
-	Headers          Header
+	Headers          sabuhp.Header
 	Conn             net.Conn
 	Req              *http.Request
 }
@@ -105,10 +68,10 @@ type Response struct {
 	Code int
 
 	// Headers the headers explicitly set by the Handler.
-	Headers Header
+	Headers sabuhp.Header
 
 	// Cookies contains the cookies to be written as part of response.
-	Cookies []Cookie
+	Cookies []sabuhp.Cookie
 
 	// Body is the buffer to which the Handler's Write calls are sent.
 	// If nil, the Writes are silently discarded.

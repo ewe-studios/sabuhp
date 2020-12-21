@@ -86,6 +86,31 @@ func (h Params) Delete(k string) {
 	delete(h, k)
 }
 
+type Header map[string][]string
+
+func (h Header) Get(k string) string {
+	if values, ok := h[k]; ok {
+		return values[0]
+	}
+	return ""
+}
+
+func (h Header) Values(k string) []string {
+	return h[k]
+}
+
+func (h Header) Add(k string, v string) {
+	h[k] = append(h[k], v)
+}
+
+func (h Header) Set(k string, v string) {
+	h[k] = append([]string{v}, v)
+}
+
+func (h Header) Delete(k string) {
+	delete(h, k)
+}
+
 type TransportResponse interface {
 	Handle(*Message, Transport) MessageErr
 }

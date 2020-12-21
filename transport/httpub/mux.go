@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/influx6/sabuhp"
 )
 
 // Mux is an HTTP request multiplexer.
@@ -116,7 +118,7 @@ func (w Wrappers) For(main Handler) Handler {
 
 // ForFunc registers the wrappers for a specific raw handler function
 // and returns a handler that can be passed via the `UseHandle` function.
-func (w Wrappers) ForFunc(mainFunc func(*Request, Params) Response) Handler {
+func (w Wrappers) ForFunc(mainFunc func(*Request, sabuhp.Params) Response) Handler {
 	return w.For(HandlerFunc(mainFunc))
 }
 
@@ -139,13 +141,13 @@ func (m *Mux) UseHandle(pattern string, handler Handler) {
 }
 
 // HandleFunc registers a route handler function for a path pattern.
-func (m *Mux) UseHandleFunc(pattern string, handlerFunc func(*Request, Params) Response) {
+func (m *Mux) UseHandleFunc(pattern string, handlerFunc func(*Request, sabuhp.Params) Response) {
 	m.UseHandle(pattern, HandlerFunc(handlerFunc))
 }
 
 // Serve exposes and serves the registered routes.
 func (m *Mux) Handle(r *Request) Response {
-	var params = Params{}
+	var params = sabuhp.Params{}
 	for _, h := range m.requestHandlers {
 		if h.Match(r) {
 			return h.Handle(r, params)
@@ -190,7 +192,7 @@ func (m *Mux) Handle(r *Request) Response {
 
 	return Response{
 		Code:    http.StatusNotFound,
-		Headers: Header{},
+		Headers: sabuhp.Header{},
 	}
 }
 
@@ -201,7 +203,7 @@ type SubMux interface {
 	Use(middlewares ...Wrapper)
 	UseHandle(pattern string, handler Handler)
 	AbsPath() string
-	UseHandleFunc(pattern string, handlerFunc func(*Request, Params) Response)
+	UseHandleFunc(pattern string, handlerFunc func(*Request, sabuhp.Params) Response)
 }
 
 // Of returns a new Mux which its Handle and HandleFunc will register the path based on given "prefix", i.e:
@@ -283,7 +285,7 @@ func (m *Mux) Unlink() SubMux {
 }
 
 func redirect(r *Request, uri string, code int) Response {
-	var h = Header{}
+	var h = sabuhp.Header{}
 	if u, err := url.Parse(uri); err == nil {
 		// If url was relative, make its path absolute by
 		// combining with request path.

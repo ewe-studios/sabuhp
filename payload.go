@@ -169,6 +169,12 @@ type Message struct {
 	// Payload is the payload for giving message.
 	Payload []byte
 
+	// Headers are related facts attached to a message.
+	Headers Header
+
+	// Headers are related facts attached to a message.
+	Cookies []Cookie
+
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
 

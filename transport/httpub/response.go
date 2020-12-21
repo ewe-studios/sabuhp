@@ -12,6 +12,8 @@ import (
 
 	"github.com/influx6/npkg"
 
+	"github.com/influx6/sabuhp"
+
 	"github.com/influx6/npkg/njson"
 )
 
@@ -33,7 +35,7 @@ func CreateError(err error, message string, code int) (bytes.Buffer, error) {
 }
 
 func HTTPRequestToRequest(req *http.Request) *Request {
-	var headers = Header(req.Header)
+	var headers = sabuhp.Header(req.Header)
 	return &Request{
 		Host:          req.Host,
 		Form:          req.Form,
@@ -47,7 +49,7 @@ func HTTPRequestToRequest(req *http.Request) *Request {
 		Headers:       headers,
 		Body:          req.Body,
 		Req:           req,
-		Cookies:       ReadCookies(headers, ""),
+		Cookies:       sabuhp.ReadCookies(headers, ""),
 	}
 }
 
@@ -58,7 +60,7 @@ func NewRequest(addr string, method string, body io.ReadCloser) (*Request, error
 	}
 
 	return &Request{
-		Headers: Header{},
+		Headers: sabuhp.Header{},
 		Host:    reqURL.Host,
 		URL:     reqURL,
 		Method:  method,
@@ -143,9 +145,9 @@ func Methods() *MethodHandler {
 
 // NoContentHandler defaults to a handler which just sends 204 status.
 // See `MethodHandler.NoContent` method.
-var NoContentHandler Handler = HandlerFunc(func(r *Request, p Params) Response {
+var NoContentHandler Handler = HandlerFunc(func(r *Request, p sabuhp.Params) Response {
 	var res Response
-	res.Headers = Header{}
+	res.Headers = sabuhp.Header{}
 	res.Code = http.StatusNoContent
 	return res
 })
@@ -208,7 +210,7 @@ func (m *MethodHandler) NoContent(methods ...string) *MethodHandler {
 
 // HandleFunc adds a handler function to be responsible for a specific HTTP Method.
 // Returns this MethodHandler for further calls.
-func (m *MethodHandler) HandleFunc(method string, handlerFunc func(r *Request, p Params) Response) *MethodHandler {
+func (m *MethodHandler) HandleFunc(method string, handlerFunc func(r *Request, p sabuhp.Params) Response) *MethodHandler {
 	m.Handle(method, HandlerFunc(handlerFunc))
 	return m
 }
@@ -222,9 +224,9 @@ func (m *MethodHandler) ServeHTTP(r *Request) Handler {
 	// The response MUST include an Allow header containing a list of valid methods for the requested resource.
 	//
 	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Allow#Examples
-	return HandlerFunc(func(req *Request, p Params) Response {
+	return HandlerFunc(func(req *Request, p sabuhp.Params) Response {
 		var w Response
-		w.Headers = Header{}
+		w.Headers = sabuhp.Header{}
 		w.Headers.Set("Allow", m.methodsAllowedStr)
 		w.Code = http.StatusMethodNotAllowed
 		w.Body = NewBufferCloser(bytes.NewBufferString(http.StatusText(http.StatusMethodNotAllowed)))
@@ -412,7 +414,7 @@ func (p *xmlProcessor) Dispatch(w http.ResponseWriter, v interface{}) error {
 // for performing giving action.
 type MatchableContextHandler interface {
 	Match(error) bool
-	Handle(r *Request, params Params) Response
+	Handle(r *Request, params sabuhp.Params) Response
 }
 
 // Matchable returns MatchableContextHandler using provided arguments.
@@ -431,7 +433,7 @@ type errorConditionImpl struct {
 }
 
 // Handler calls the internal http.Handler with provided Ctx returning error.
-func (ec errorConditionImpl) Handle(r *Request, params Params) Response {
+func (ec errorConditionImpl) Handle(r *Request, params sabuhp.Params) Response {
 	return ec.Fn.Handle(r, params)
 }
 
@@ -456,7 +458,7 @@ type fnErrorCondition struct {
 }
 
 // http.Handler calls the internal http.Handler with provided Ctx returning error.
-func (ec fnErrorCondition) Handle(r *Request, params Params) Response {
+func (ec fnErrorCondition) Handle(r *Request, params sabuhp.Params) Response {
 	return ec.Fn.Handle(r, params)
 }
 

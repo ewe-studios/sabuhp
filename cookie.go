@@ -1,4 +1,4 @@
-package httpub
+package sabuhp
 
 import (
 	"log"
@@ -55,14 +55,17 @@ const (
 	SameSiteNoneMode
 )
 
-// readSetCookies parses all "Set-Cookie" values from
+// ReadSetCookies parses all "Set-Cookie" values from
 // the header h and returns the successfully parsed Cookies.
-func readSetCookies(h Header) []*Cookie {
+//
+// ReadSetCookies is more stricter on the names and values
+// of cookies.
+func ReadSetCookies(h Header) []Cookie {
 	cookieCount := len(h["Set-Cookie"])
 	if cookieCount == 0 {
-		return []*Cookie{}
+		return []Cookie{}
 	}
-	cookies := make([]*Cookie, 0, cookieCount)
+	cookies := make([]Cookie, 0, cookieCount)
 	for _, line := range h["Set-Cookie"] {
 		parts := strings.Split(strings.TrimSpace(line), ";")
 		if len(parts) == 1 && parts[0] == "" {
@@ -81,7 +84,7 @@ func readSetCookies(h Header) []*Cookie {
 		if !ok {
 			continue
 		}
-		c := &Cookie{
+		c := Cookie{
 			Name:  name,
 			Value: value,
 			Raw:   line,

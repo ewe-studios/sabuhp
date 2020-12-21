@@ -2,6 +2,7 @@ package ochestrator
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -612,6 +613,20 @@ func (s *Station) Init() error {
 		writer.WriteHeader(http.StatusOK)
 	}), "GET", "HEAD")
 
+	s.router.Http("/_routes", sabuhp.HandlerFunc(func(
+		writer http.ResponseWriter,
+		request *http.Request,
+		params sabuhp.Params,
+	) {
+		writer.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(writer).Encode(s.router.Routes()); err != nil {
+			var logMessage = njson.MJSON("failed to render response")
+			logMessage.String("addr", s.Addr)
+			logMessage.Error("error", err)
+			s.Logger.Log(logMessage)
+		}
+	}), "GET", "HEAD")
+
 	// create worker hub
 	var workerHub, createWorkerHubErr = s.CreateWorkerHub(s.Ctx, s.Logger, s.WorkerRegistry, s.manager)
 	if createWorkerHubErr != nil {
@@ -660,5 +675,6 @@ func (s *Station) Init() error {
 
 		s.sseHub = sseHub
 	}
+
 	return nil
 }
