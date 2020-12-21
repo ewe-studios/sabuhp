@@ -166,7 +166,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	group.Stop()
 
 	var stats3 = group.Stats()
-	require.Equal(t, 4, stats3.TotalKilledWorkers)
+	require.True(t, stats3.TotalKilledWorkers > 1)
 	require.Equal(t, 1, stats3.TotalEscalations)
 	require.Equal(t, 1, stats3.TotalRestarts)
 	require.Equal(t, 1, stats3.TotalPanics)

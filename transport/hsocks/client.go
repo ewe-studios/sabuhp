@@ -82,9 +82,10 @@ func NewClient(
 	return client
 }
 
-func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration) ([]byte, error) {
-
-	var header = http.Header{}
+func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration, header sabuhp.Header) ([]byte, error) {
+	if header == nil {
+		header = sabuhp.Header{}
+	}
 	header.Set(ClientIdentificationHeader, sc.id.String())
 
 	var ctx = sc.ctx
@@ -97,7 +98,7 @@ func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration) ([]
 
 	defer canceler()
 
-	var req, response, err = sc.try(method, bytes.NewBuffer(msg), ctx)
+	var req, response, err = sc.try(method, header, bytes.NewBuffer(msg), ctx)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
@@ -139,8 +140,7 @@ func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration) ([]
 	return responseBody.Bytes(), nil
 }
 
-func (sc *SendClient) try(method string, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {
-	var header = http.Header{}
+func (sc *SendClient) try(method string, header sabuhp.Header, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {
 	header.Set(ClientIdentificationHeader, sc.id.String())
 
 	var retryCount int
@@ -154,7 +154,7 @@ func (sc *SendClient) try(method string, body io.Reader, ctx context.Context) (*
 			method,
 			sc.route,
 			body,
-			header,
+			http.Header(header),
 		)
 		if err != nil && retryCount < sc.maxRetries && method == "GET" {
 			retryCount++

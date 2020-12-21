@@ -2,7 +2,6 @@ package hsocks
 
 import (
 	"context"
-	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influx6/npkg/nxid"
+
 	"github.com/influx6/sabuhp/codecs"
 	"github.com/influx6/sabuhp/managers"
 
@@ -85,10 +85,12 @@ func TestNewHub(t *testing.T) {
 	require.NoError(t, topicErr)
 	require.NotEmpty(t, topicMessage)
 
-	var response, sendErr2 = socket.Send("POST", topicMessage, 0)
+	var header = sabuhp.Header{}
+	header.Set("Content-Type", sabuhp.MessageContentType)
+
+	var response, sendErr2 = socket.Send("POST", topicMessage, 0, header)
 	require.NoError(t, sendErr2)
 
-	fmt.Printf("Server response: %+q\n", response)
 	var messageReceived, messageErr = codec.Decode(response)
 	require.NoError(t, messageErr)
 	require.Equal(t, "alex", string(messageReceived.Payload))

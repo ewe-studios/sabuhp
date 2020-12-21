@@ -403,12 +403,19 @@ func (se *ServletSocket) Start() error {
 
 	var decodedMessage, decodedErr = se.transposer.Transpose(se.req, se.params)
 	if decodedErr != nil {
-		se.res.WriteHeader(http.StatusBadRequest)
+		var statusCode int
+		if nerror.IsAny(decodedErr, sabuhp.BodyToLargeErr) {
+			statusCode = http.StatusRequestEntityTooLarge
+		} else {
+			statusCode = http.StatusBadRequest
+		}
+
+		se.res.WriteHeader(statusCode)
 		if err := utils.CreateError(
 			se.res,
 			decodedErr,
 			"Failed to read request body",
-			http.StatusBadRequest,
+			statusCode,
 		); err != nil {
 			stack.New().
 				LError().

@@ -2,7 +2,9 @@ package sabuhp
 
 import (
 	"fmt"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/influx6/npkg/nunsafe"
@@ -169,11 +171,40 @@ type Message struct {
 	// Payload is the payload for giving message.
 	Payload []byte
 
+	// ContentType is an optional value set usually by a message
+	// generated from a http request or by the user intentionally.
+	ContentType string
+
 	// Headers are related facts attached to a message.
 	Headers Header
 
 	// Headers are related facts attached to a message.
+	//
+	// Only available when set, so it's very optional
 	Cookies []Cookie
+
+	// Form contains the parsed form data, including both the URL
+	// field's query parameters and the PATCH, POST, or PUT form data.
+	//
+	// Only available when set, so it's very optional
+	Form url.Values
+
+	// Query contains the parsed form data, including both the URL
+	// field's query parameters and the PATCH, POST, or PUT form data.
+	//
+	// Only available when set, so it's very optional
+	Query url.Values
+
+	// PostForm contains the parsed form data from PATCH, POST
+	// or PUT body parameters.
+	//
+	// Only available when set, so it's very optional
+	PostForm url.Values
+
+	// MultipartForm is the parsed multipart form, including file uploads.
+	//
+	// Only available when set, so it's very optional
+	MultipartReader *multipart.Reader
 
 	// Metadata are related facts attached to a message.
 	Metadata map[string]string
