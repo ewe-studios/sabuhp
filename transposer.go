@@ -51,6 +51,10 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 	if messageErr != nil {
 		return nil, nerror.WrapOnly(messageErr)
 	}
+
+	message.Cookies = ReadCookies(Header(req.Header), "")
+	message.Headers = Header(req.Header.Clone())
+
 	for k, v := range params {
 		message.Params[k] = v
 	}
