@@ -75,6 +75,56 @@ func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
 	))
 }
 
+// HttpServiceWithName registers handlers for giving only through the http router
+// it does not add said handler into the event manager. This exists
+// to allow http requests to be treated as message event.
+//
+// The event name will be the route of the http request path.
+//
+// Understand that closing the channel does not close the http endpoint.
+func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp.TransportResponse, methods ...string) {
+	var muxHandler = m.pre.For(handler)
+	var searchRoute = m.rootPath + route
+	methods = toLower(methods)
+	m.trie.Insert(searchRoute, WithHandler(
+		m.preHttp.ForFunc(
+			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, muxHandler)
+			},
+		),
+	))
+}
+
+// HttpService registers handlers for giving only through the http router
+// it does not add said handler into the event manager. This exists
+// to allow http requests to be treated as message event.
+//
+// The event name will be the route of the http request path.
+//
+// Understand that closing the channel does not close the http endpoint.
+func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, methods ...string) {
+	var muxHandler = m.pre.For(handler)
+	var searchRoute = m.rootPath + route
+	methods = toLower(methods)
+	m.trie.Insert(searchRoute, WithHandler(
+		m.preHttp.ForFunc(
+			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+
+				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, muxHandler)
+			},
+		),
+	))
+}
+
 // Service registers handlers for giving event returning
 // events channel.
 //
