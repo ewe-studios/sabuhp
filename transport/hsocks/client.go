@@ -165,6 +165,7 @@ func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Dura
 			Delivery: sabuhp.SendToAll,
 			MessageMeta: sabuhp.MessageMeta{
 				ContentType:     contentType,
+				Path:            req.URL.Path,
 				Query:           req.URL.Query(),
 				Form:            req.Form,
 				Headers:         sabuhp.Header(response.Header.Clone()),
@@ -182,6 +183,9 @@ func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Dura
 	var responseMessage, responseMsgErr = sc.codec.Decode(responseBody.Bytes())
 	if responseMsgErr != nil {
 		return nil, nerror.WrapOnly(responseMsgErr)
+	}
+	if len(responseMessage.MessageMeta.Path) == 0 {
+		responseMessage.MessageMeta.Path = req.URL.Path
 	}
 
 	return responseMessage, nil

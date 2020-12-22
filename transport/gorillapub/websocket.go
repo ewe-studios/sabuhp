@@ -873,6 +873,7 @@ func (g *GorillaSocket) manageReads() {
 				Delivery: sabuhp.SendToAll,
 				MessageMeta: sabuhp.MessageMeta{
 					ContentType:     "any",
+					Path:            info.Path,
 					Query:           info.Query,
 					Form:            url.Values{},
 					Headers:         sabuhp.Header{},
@@ -899,6 +900,7 @@ func (g *GorillaSocket) manageReads() {
 				Delivery: sabuhp.SendToAll,
 				MessageMeta: sabuhp.MessageMeta{
 					ContentType:     "any",
+					Path:            info.Path,
 					Query:           info.Query,
 					Form:            url.Values{},
 					Headers:         sabuhp.Header{},
@@ -932,6 +934,10 @@ func (g *GorillaSocket) manageReads() {
 			}))
 
 			continue
+		}
+
+		if len(deliveredMessage.MessageMeta.Path) == 0 {
+			deliveredMessage.MessageMeta.Path = info.Path
 		}
 
 		g.deliver <- deliveredMessage

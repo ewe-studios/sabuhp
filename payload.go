@@ -50,6 +50,9 @@ const (
 )
 
 type MessageMeta struct {
+	// Path of the request producing this if from http.
+	Path string
+
 	// SuggestedStatusCode is an optional field settable by the
 	// creator to suggest possible status code of a message.
 	SuggestedStatusCode int

@@ -289,15 +289,19 @@ doLoop:
 							End()
 						continue doLoop
 					}
+					if len(message.MessageMeta.Path) == 0 {
+						message.MessageMeta.Path = sc.request.URL.Path
+					}
 				} else {
 					var payload = make([]byte, len(dataLine))
 					_ = copy(payload, dataLine)
 
 					message = &sabuhp.Message{
-						Topic:    "",
+						Topic:    sc.request.URL.Path,
 						ID:       nxid.New(),
 						Delivery: sabuhp.SendToAll,
 						MessageMeta: sabuhp.MessageMeta{
+							Path:            sc.request.URL.Path,
 							ContentType:     contentType,
 							Query:           url.Values{},
 							Form:            url.Values{},
