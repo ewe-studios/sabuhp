@@ -28,3 +28,23 @@ func (j *GobCodec) Decode(b []byte) (*sabuhp.Message, error) {
 	}
 	return &message, nil
 }
+
+var _ sabuhp.WrappedCodec = (*WrappedGobCodec)(nil)
+
+type WrappedGobCodec struct{}
+
+func (j *WrappedGobCodec) Encode(message *sabuhp.WrappedPayload) ([]byte, error) {
+	var buf bytes.Buffer
+	if encodedErr := gob.NewEncoder(&buf).Encode(message); encodedErr != nil {
+		return nil, nerror.WrapOnly(encodedErr)
+	}
+	return buf.Bytes(), nil
+}
+
+func (j *WrappedGobCodec) Decode(b []byte) (*sabuhp.WrappedPayload, error) {
+	var message sabuhp.WrappedPayload
+	if jsonErr := gob.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
+		return nil, nerror.WrapOnly(jsonErr)
+	}
+	return &message, nil
+}

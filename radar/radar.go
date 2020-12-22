@@ -20,6 +20,7 @@ type MuxConfig struct {
 	Manager    *managers.Manager
 	Ctx        context.Context
 	Transposer sabuhp.Transposer
+	Translator sabuhp.Translator
 	Headers    sabuhp.HeaderModifications
 }
 
@@ -54,6 +55,7 @@ func NewMux(config MuxConfig) *Mux {
 			config.Ctx,
 			config.Logger,
 			config.Transposer,
+			config.Translator,
 			config.Manager,
 			config.Headers,
 		),

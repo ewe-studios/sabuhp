@@ -12,14 +12,23 @@ import (
 	"github.com/influx6/npkg/nxid"
 )
 
-// MessageHandler defines the function contract a sabuhp.Socket uses
+// MessageHandler defines the function contract a manager uses
+// to handle a message.
+//
+// Be aware that returning an error from the handler to the Gorilla socket
+// will cause the immediate closure of that socket and ending communication
+// with the client and the error will be logged. So unless your intention is to
+// end the connection, handle it yourself.
+type MessageHandler func(b []byte, from Socket) error
+
+// SocketHandler defines the function contract a sabuhp.Socket uses
 // to handle a message.
 //
 // Be aware that returning an error from the handler to the Gorilla sabuhp.Socket
 // will cause the immediate closure of that socket and ending communication
 // with the client and the error will be logged. So unless your intention is to
 // end the connection, handle it yourself.
-type MessageHandler func(b []byte, from Socket) error
+type SocketHandler func(b *Message, from Socket) error
 
 type SocketStat struct {
 	Addr       net.Addr
@@ -109,6 +118,6 @@ type Socket interface {
 	Stat() SocketStat
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
-	Send([]byte, time.Duration) error
-	SendWriter(io.WriterTo, time.Duration) ErrorWaiter
+	Send([]byte, MessageMeta, time.Duration) error
+	SendWriter(io.WriterTo, MessageMeta, time.Duration) ErrorWaiter
 }

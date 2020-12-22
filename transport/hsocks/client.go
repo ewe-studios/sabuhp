@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/influx6/npkg/njson"
@@ -14,6 +15,7 @@ import (
 	"github.com/influx6/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
+
 	"github.com/influx6/sabuhp/utils"
 )
 
@@ -21,6 +23,7 @@ type MessageHandler func(message []byte, socket *SendClient) error
 
 type HttpHub struct {
 	maxRetries int
+	codec      sabuhp.Codec
 	retryFunc  sabuhp.RetryFunc
 	ctx        context.Context
 	client     *http.Client
@@ -30,6 +33,7 @@ type HttpHub struct {
 func NewHub(
 	ctx context.Context,
 	maxRetries int,
+	codec sabuhp.Codec,
 	client *http.Client,
 	logging sabuhp.Logger,
 	retryFn sabuhp.RetryFunc,
@@ -37,20 +41,21 @@ func NewHub(
 	if client.CheckRedirect == nil {
 		client.CheckRedirect = utils.CheckRedirect
 	}
-	return &HttpHub{ctx: ctx, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
+	return &HttpHub{ctx: ctx, codec: codec, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
 }
 
 func (se *HttpHub) For(
 	id nxid.ID,
 	route string,
 ) (*SendClient, error) {
-	return NewClient(id, route, se.maxRetries, se.ctx, se.retryFunc, se.logging, se.client), nil
+	return NewClient(se.ctx, id, route, se.maxRetries, se.codec, se.retryFunc, se.logging, se.client), nil
 }
 
 type SendClient struct {
 	id         nxid.ID
 	maxRetries int
 	route      string
+	codec      sabuhp.Codec
 	logger     sabuhp.Logger
 	retryFunc  sabuhp.RetryFunc
 	ctx        context.Context
@@ -60,10 +65,11 @@ type SendClient struct {
 }
 
 func NewClient(
+	ctx context.Context,
 	id nxid.ID,
 	route string,
 	maxRetries int,
-	ctx context.Context,
+	codec sabuhp.Codec,
 	retryFn sabuhp.RetryFunc,
 	logger sabuhp.Logger,
 	reqClient *http.Client,
@@ -71,6 +77,7 @@ func NewClient(
 	var client = &SendClient{
 		id:         id,
 		route:      route,
+		codec:      codec,
 		maxRetries: maxRetries,
 		logger:     logger,
 		client:     reqClient,
@@ -82,11 +89,13 @@ func NewClient(
 	return client
 }
 
-func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration, header sabuhp.Header) ([]byte, error) {
-	if header == nil {
-		header = sabuhp.Header{}
+func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Duration) (*sabuhp.Message, error) {
+	var header = sabuhp.Header{}
+	for k, v := range msg.Headers {
+		header[k] = v
 	}
 	header.Set(ClientIdentificationHeader, sc.id.String())
+	header.Set("Content-Type", sabuhp.MessageContentType)
 
 	var ctx = sc.ctx
 	var canceler context.CancelFunc
@@ -98,15 +107,24 @@ func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration, hea
 
 	defer canceler()
 
-	var req, response, err = sc.try(method, header, bytes.NewBuffer(msg), ctx)
+	var payload, payloadErr = sc.codec.Encode(msg)
+	if payloadErr != nil {
+		return nil, nerror.WrapOnly(payloadErr)
+	}
+
+	var req, response, err = sc.try(method, header, bytes.NewBuffer(payload), ctx)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
+	}
+
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return nil, nerror.New("failed to request [Status Code: %d]", response.StatusCode)
 	}
 
 	njson.Log(sc.logger).New().
 		LInfo().
 		Message("sent SSE http request").
-		Bytes("msg", msg).
+		Object("msg", msg).
 		String("url", req.URL.String()).
 		String("method", req.Method).
 		String("remote_addr", req.RemoteAddr).
@@ -114,18 +132,19 @@ func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration, hea
 		Int("response_status_code", response.StatusCode).
 		End()
 
-	var responseBody = bytes.NewBuffer(make([]byte, 0, 128))
+	var responseBody = bytes.NewBuffer(make([]byte, 0, 512))
 	if _, readErr := io.Copy(responseBody, response.Body); readErr != nil {
+		var wrappedErr = nerror.WrapOnly(readErr)
 		njson.Log(sc.logger).New().
 			LError().
 			Message("failed to read response").
-			Bytes("msg", msg).
+			Object("msg", msg).
 			String("url", req.URL.String()).
 			String("method", req.Method).
 			String("remote_addr", req.RemoteAddr).
 			String("response_status", response.Status).
 			Int("response_status_code", response.StatusCode).
-			String("error", nerror.WrapOnly(readErr).Error()).
+			Error("error", wrappedErr).
 			End()
 	}
 
@@ -137,7 +156,35 @@ func (sc *SendClient) Send(method string, msg []byte, timeout time.Duration, hea
 			End()
 	}
 
-	return responseBody.Bytes(), nil
+	var contentType = response.Header.Get("Content-Type")
+	var contentTypeLower = strings.ToLower(contentType)
+	if !strings.Contains(contentTypeLower, sabuhp.MessageContentType) {
+		return &sabuhp.Message{
+			Topic:    req.URL.Path,
+			ID:       nxid.New(),
+			Delivery: sabuhp.SendToAll,
+			MessageMeta: sabuhp.MessageMeta{
+				ContentType:     contentType,
+				Query:           req.URL.Query(),
+				Form:            req.Form,
+				Headers:         sabuhp.Header(response.Header.Clone()),
+				Cookies:         sabuhp.ReadCookies(sabuhp.Header(response.Header), ""),
+				MultipartReader: nil,
+			},
+			Payload:             responseBody.Bytes(),
+			Metadata:            map[string]string{},
+			Params:              map[string]string{},
+			LocalPayload:        nil,
+			OverridingTransport: nil,
+		}, nil
+	}
+
+	var responseMessage, responseMsgErr = sc.codec.Decode(responseBody.Bytes())
+	if responseMsgErr != nil {
+		return nil, nerror.WrapOnly(responseMsgErr)
+	}
+
+	return responseMessage, nil
 }
 
 func (sc *SendClient) try(method string, header sabuhp.Header, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {

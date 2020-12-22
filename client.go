@@ -8,6 +8,11 @@ import (
 	"github.com/influx6/npkg/nunsafe"
 )
 
+type WrappedCodec interface {
+	Encode(payload *WrappedPayload) ([]byte, error)
+	Decode(b []byte) (*WrappedPayload, error)
+}
+
 // Codec embodies implementation for the serialization of
 // a message into bytes and vice-versa.
 type Codec interface {

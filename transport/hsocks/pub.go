@@ -34,6 +34,7 @@ func ManagedHttpServlet(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	transposer sabuhp.Transposer,
+	translator sabuhp.Translator,
 	manager *managers.Manager,
 	optionalHeaders sabuhp.HeaderModifications,
 ) *HttpServlet {
@@ -41,6 +42,7 @@ func ManagedHttpServlet(
 		ctx:             ctx,
 		logger:          logger,
 		manager:         manager,
+		translator:      translator,
 		transposer:      transposer,
 		optionalHeaders: optionalHeaders,
 	}
@@ -49,6 +51,7 @@ func ManagedHttpServlet(
 type HttpServlet struct {
 	logger          sabuhp.Logger
 	transposer      sabuhp.Transposer
+	translator      sabuhp.Translator
 	optionalHeaders sabuhp.HeaderModifications
 	ctx             context.Context
 	manager         *managers.Manager
@@ -117,6 +120,7 @@ func (htp *HttpServlet) HandleMessage(
 		p,
 		htp.logger,
 		htp.transposer,
+		htp.translator,
 		htp.manager,
 		htp.optionalHeaders,
 		overrideResponder,
@@ -208,6 +212,7 @@ type ServletSocket struct {
 	codec             sabuhp.Codec
 	manager           *managers.Manager
 	transposer        sabuhp.Transposer
+	translator        sabuhp.Translator
 	headers           sabuhp.HeaderModifications
 	overridingHandler sabuhp.TransportResponse
 	remoteAddr        net.Addr
@@ -226,6 +231,7 @@ func NewServletSocket(
 	params sabuhp.Params,
 	logger sabuhp.Logger,
 	transposer sabuhp.Transposer,
+	translator sabuhp.Translator,
 	manager *managers.Manager,
 	optionalHeaders sabuhp.HeaderModifications,
 	overridingHandler sabuhp.TransportResponse,
@@ -240,6 +246,7 @@ func NewServletSocket(
 		clientId:          clientId,
 		ctx:               newCtx,
 		transposer:        transposer,
+		translator:        translator,
 		manager:           manager,
 		params:            params,
 		codec:             manager.Codec(),
@@ -296,55 +303,23 @@ func (se *ServletSocket) LocalAddr() net.Addr {
 
 // SendWriter implements the necessary method to send data across the writer to the
 // underline response object.
-func (se *ServletSocket) SendWriter(msgWriter io.WriterTo, timeout time.Duration) sabuhp.ErrorWaiter {
-	var timeoutChan <-chan time.Time
-	if timeout > 0 {
-		timeoutChan = time.After(timeout)
-	}
-
+func (se *ServletSocket) SendWriter(msgWriter io.WriterTo, meta sabuhp.MessageMeta, _ time.Duration) sabuhp.ErrorWaiter {
 	var socketWriter = sabuhp.NewSocketWriterTo(msgWriter)
-	select {
-	case <-se.req.Context().Done():
-		socketWriter.Abort(se.req.Context().Err())
+	if sendErr := se.translator.TranslateWriter(se.res, socketWriter, meta); sendErr != nil {
+		socketWriter.Abort(sendErr)
 		se.canceler()
 		return socketWriter
-	case <-timeoutChan: // nil channel will be ignored
-		socketWriter.Abort(nerror.New("message delivery timeout"))
-		se.canceler()
-		return socketWriter
-	case <-se.ctx.Done():
-		socketWriter.Abort(nerror.New("not receiving anymore messages"))
-		se.canceler()
-		return socketWriter
-	default:
-		// add new data into the write buffer
-		_, _ = socketWriter.WriteTo(se.res)
 	}
-
+	// close write channel
 	se.canceler()
 	return socketWriter
 }
 
-func (se *ServletSocket) Send(msg []byte, timeout time.Duration) error {
-	var timeoutChan <-chan time.Time
-	if timeout > 0 {
-		timeoutChan = time.After(timeout)
+func (se *ServletSocket) Send(msg []byte, meta sabuhp.MessageMeta, _ time.Duration) error {
+	if sendErr := se.translator.TranslateBytes(se.res, msg, meta); sendErr != nil {
+		se.canceler()
+		return nerror.WrapOnly(sendErr)
 	}
-
-	select {
-	case <-se.req.Context().Done():
-		return nerror.New("not receiving anymore messages")
-	case <-timeoutChan: // nil channel will be ignored
-		return nerror.New("message delivery timeout")
-	case <-se.ctx.Done():
-		return nerror.New("not receiving anymore messages")
-	default:
-		// add new data into the write buffer
-		if _, err := se.res.Write(msg); err != nil {
-			return nerror.WrapOnly(err)
-		}
-	}
-
 	// close write channel
 	se.canceler()
 	return nil
@@ -382,14 +357,12 @@ func (se *ServletSocket) Listen(_ string, _ sabuhp.TransportResponse) sabuhp.Cha
 }
 
 func (se *ServletSocket) SendToOne(msg *sabuhp.Message, ts time.Duration) error {
-	var encoded, encodedErr = se.codec.Encode(msg)
-	if encodedErr != nil {
-		return nerror.WrapOnly(encodedErr)
-	}
-
-	if sendErr := se.Send(encoded, ts); sendErr != nil {
+	if sendErr := se.translator.Translate(se.res, msg); sendErr != nil {
+		se.canceler()
 		return nerror.WrapOnly(sendErr)
 	}
+	// close write channel
+	se.canceler()
 	return nil
 }
 

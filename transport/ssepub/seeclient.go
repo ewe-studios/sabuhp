@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +17,7 @@ import (
 	"github.com/influx6/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
+
 	"github.com/influx6/sabuhp/utils"
 )
 
@@ -26,10 +27,11 @@ var (
 	dataHeaderBytes = []byte("data:")
 )
 
-type MessageHandler func(message []byte, socket *SSEClient) error
+type MessageHandler func(message *sabuhp.Message, socket *SSEClient) error
 
 type SSEHub struct {
 	maxRetries int
+	codec      sabuhp.Codec
 	retryFunc  sabuhp.RetryFunc
 	ctx        context.Context
 	client     *http.Client
@@ -40,17 +42,25 @@ func NewSSEHub(
 	ctx context.Context,
 	maxRetries int,
 	client *http.Client,
+	codec sabuhp.Codec,
 	logging sabuhp.Logger,
 	retryFn sabuhp.RetryFunc,
 ) *SSEHub {
 	if client.CheckRedirect == nil {
 		client.CheckRedirect = utils.CheckRedirect
 	}
-	return &SSEHub{ctx: ctx, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
+	return &SSEHub{
+		ctx:        ctx,
+		codec:      codec,
+		maxRetries: maxRetries,
+		client:     client,
+		retryFunc:  retryFn,
+		logging:    logging,
+	}
 }
 
 func (se *SSEHub) Get(handler MessageHandler, id nxid.ID, route string, lastEventIds ...string) (*SSEClient, error) {
-	return se.For(handler, id, "GET", route, nil, lastEventIds...)
+	return se.For(handler, id, "GET", route, lastEventIds...)
 }
 
 func (se *SSEHub) For(
@@ -58,7 +68,6 @@ func (se *SSEHub) For(
 	id nxid.ID,
 	method string,
 	route string,
-	body io.Reader,
 	lastEventIds ...string,
 ) (*SSEClient, error) {
 	var header = http.Header{}
@@ -69,12 +78,22 @@ func (se *SSEHub) For(
 		header.Set(LastEventIdListHeader, strings.Join(lastEventIds, ";"))
 	}
 
-	var req, response, err = utils.DoRequest(se.ctx, se.client, method, route, body, header)
+	var req, response, err = utils.DoRequest(se.ctx, se.client, method, route, nil, header)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
 
-	return NewSSEClient(id, se.maxRetries, handler, req, response, se.retryFunc, se.logging, se.client), nil
+	return NewSSEClient(
+		id,
+		se.maxRetries,
+		handler,
+		req,
+		response,
+		se.retryFunc,
+		se.codec,
+		se.logging,
+		se.client,
+	), nil
 }
 
 type SSEClient struct {
@@ -82,6 +101,7 @@ type SSEClient struct {
 	maxRetries int
 	logger     sabuhp.Logger
 	retryFunc  sabuhp.RetryFunc
+	codec      sabuhp.Codec
 	handler    MessageHandler // ensure to copy the bytes if your use will span multiple goroutines
 	ctx        context.Context
 	canceler   context.CancelFunc
@@ -100,6 +120,7 @@ func NewSSEClient(
 	req *http.Request,
 	res *http.Response,
 	retryFn sabuhp.RetryFunc,
+	codec sabuhp.Codec,
 	logger sabuhp.Logger,
 	reqClient *http.Client,
 ) *SSEClient {
@@ -110,6 +131,7 @@ func NewSSEClient(
 	var newCtx, canceler = context.WithCancel(req.Context())
 	var client = &SSEClient{
 		id:         id,
+		codec:      codec,
 		maxRetries: maxRetries,
 		logger:     logger,
 		client:     reqClient,
@@ -132,8 +154,12 @@ func (sc *SSEClient) Wait() {
 	sc.waiter.Wait()
 }
 
-func (sc *SSEClient) Send(method string, msg []byte, timeout time.Duration) ([]byte, error) {
+func (sc *SSEClient) Send(method string, msg *sabuhp.Message, timeout time.Duration) error {
 	var header = http.Header{}
+	for k, v := range msg.Headers {
+		header[k] = v
+	}
+
 	header.Set("Cache-Control", "no-cache")
 	header.Set(ClientIdentificationHeader, sc.id.String())
 	if !sc.lastId.IsNil() {
@@ -151,12 +177,17 @@ func (sc *SSEClient) Send(method string, msg []byte, timeout time.Duration) ([]b
 
 	defer canceler()
 
+	var payloadBytes, payloadErr = sc.codec.Encode(msg)
+	if payloadErr != nil {
+		return nerror.WrapOnly(payloadErr)
+	}
+
 	var req, response, err = utils.DoRequest(
 		ctx,
 		sc.client,
 		method,
 		sc.request.URL.String(),
-		bytes.NewReader(msg),
+		bytes.NewReader(payloadBytes),
 		header,
 	)
 	if err != nil {
@@ -165,13 +196,19 @@ func (sc *SSEClient) Send(method string, msg []byte, timeout time.Duration) ([]b
 			Message("failed to send request request").
 			String("error", nerror.WrapOnly(err).Error()).
 			End()
-		return nil, nerror.WrapOnly(err)
+		return nerror.WrapOnly(err)
+	}
+
+	_ = response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return nerror.New("failed to request [Status Code: %d]", response.StatusCode)
 	}
 
 	njson.Log(sc.logger).New().
 		LInfo().
 		Message("sent SSE http request").
-		Bytes("msg", msg).
+		Object("msg", msg).
 		String("url", req.URL.String()).
 		String("method", req.Method).
 		String("remote_addr", req.RemoteAddr).
@@ -179,30 +216,7 @@ func (sc *SSEClient) Send(method string, msg []byte, timeout time.Duration) ([]b
 		Int("response_status_code", response.StatusCode).
 		End()
 
-	var responseBody = bytes.NewBuffer(make([]byte, 0, 128))
-	if _, readErr := io.Copy(responseBody, response.Body); readErr != nil {
-		njson.Log(sc.logger).New().
-			LError().
-			Message("failed to read response").
-			Bytes("msg", msg).
-			String("url", req.URL.String()).
-			String("method", req.Method).
-			String("remote_addr", req.RemoteAddr).
-			String("response_status", response.Status).
-			Int("response_status_code", response.StatusCode).
-			String("error", nerror.WrapOnly(readErr).Error()).
-			End()
-	}
-
-	if closeErr := response.Body.Close(); closeErr != nil {
-		njson.Log(sc.logger).New().
-			LError().
-			Message("failed to close response body").
-			String("error", nerror.WrapOnly(err).Error()).
-			End()
-	}
-
-	return responseBody.Bytes(), nil
+	return nil
 }
 
 // Close closes client's request and response cycle
@@ -217,6 +231,7 @@ func (sc *SSEClient) run() {
 	var normalized = utils.NewNormalisedReader(sc.response.Body)
 	var reader = bufio.NewReader(normalized)
 
+	var contentType string
 	var decoding = false
 	var data bytes.Buffer
 doLoop:
@@ -260,11 +275,50 @@ doLoop:
 
 				var dataLine = bytes.TrimPrefix(data.Bytes(), dataHeaderBytes)
 				dataLine = bytes.TrimPrefix(dataLine, spaceBytes)
-				if handleErr := sc.handler(dataLine, sc); handleErr != nil {
+
+				var messageErr error
+				var message *sabuhp.Message
+				if contentType == sabuhp.MessageContentType {
+					message, messageErr = sc.codec.Decode(dataLine)
+					if messageErr != nil {
+						var wrappedErr = nerror.WrapOnly(messageErr)
+						njson.Log(sc.logger).New().
+							LError().
+							Message("failed to handle message").
+							Error("error", wrappedErr).
+							End()
+						continue doLoop
+					}
+				} else {
+					var payload = make([]byte, len(dataLine))
+					_ = copy(payload, dataLine)
+
+					message = &sabuhp.Message{
+						Topic:    "",
+						ID:       nxid.New(),
+						Delivery: sabuhp.SendToAll,
+						MessageMeta: sabuhp.MessageMeta{
+							ContentType:     contentType,
+							Query:           url.Values{},
+							Form:            url.Values{},
+							Headers:         sabuhp.Header{},
+							Cookies:         nil,
+							MultipartReader: nil,
+						},
+						Payload:             payload,
+						Metadata:            map[string]string{},
+						Params:              map[string]string{},
+						LocalPayload:        nil,
+						OverridingTransport: nil,
+					}
+				}
+
+				if handleErr := sc.handler(message, sc); handleErr != nil {
+					var wrappedErr = nerror.WrapOnly(handleErr)
 					njson.Log(sc.logger).New().
 						LError().
 						Message("failed to handle message").
-						String("error", nerror.WrapOnly(handleErr).Error()).
+						Error("error", wrappedErr).
 						End()
 				}
 			}
@@ -277,7 +331,8 @@ doLoop:
 		}
 
 		var stripLine = strings.TrimSpace(line)
-		if stripLine == SSEStreamHeader {
+		if strings.HasPrefix(stripLine, eventHeader) {
+			contentType = strings.TrimSpace(strings.TrimPrefix(stripLine, eventHeader))
 			decoding = true
 			data.Reset()
 			continue
@@ -299,6 +354,7 @@ func (sc *SSEClient) reconnect() {
 	default:
 	}
 	var header = http.Header{}
+	header.Set("Connection", "keep-alive")
 	header.Set("Cache-Control", "no-cache")
 	header.Set("Accept", "text/event-stream")
 	header.Set(ClientIdentificationHeader, sc.id.String())
