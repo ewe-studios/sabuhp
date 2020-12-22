@@ -6,6 +6,16 @@ Power your backend with a hybrid service layer communicating across a message bu
 
 It exposes a your services across both a http, server-sent events and websocket endpoints, allowing varying clients to communicate across your services over a message bus.
 
+
+## Protocols
+
+SabuHP supports the following protocols for communicating with the service server (allowing both backend and frontend easily inter-related through such protocols):
+
+- Websocket
+- HTTP
+- HTTP Server Sent Events
+
+
 ## Getting
 
 ```
