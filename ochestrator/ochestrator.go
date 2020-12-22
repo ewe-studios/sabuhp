@@ -134,6 +134,16 @@ func DefaultRedisTransportWithOptions(
 	return redisTransport, nil
 }
 
+func RedisTransportWithOptions(config redis.Options) TransportCreator {
+	return func(
+		ctx context.Context,
+		logger sabuhp.Logger,
+		codec sabuhp.Codec,
+	) (sabuhp.Transport, error) {
+		return DefaultRedisTransportWithOptions(ctx, logger, codec, config)
+	}
+}
+
 func DefaultRedisTransport(
 	ctx context.Context,
 	logger sabuhp.Logger,

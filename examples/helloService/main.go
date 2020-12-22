@@ -15,6 +15,8 @@ import (
 	"github.com/influx6/sabuhp/ochestrator"
 	"github.com/influx6/sabuhp/slaves"
 	"github.com/influx6/sabuhp/testingutils"
+
+	redis "github.com/go-redis/redis/v8"
 )
 
 var (
@@ -59,7 +61,10 @@ func main() {
 
 	var workerId = nxid.New()
 	var station = ochestrator.DefaultStation(masterCtx, workerId, ":7800", mainLogger, workerRegistry)
-
+	station.CreateTransport = ochestrator.RedisTransportWithOptions(redis.Options{
+		Network: "tcp",
+		Addr:    "localhost:7090",
+	})
 	// use json encoder
 	station.CreateCodec = ochestrator.JsonCodec
 
