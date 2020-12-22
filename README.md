@@ -4,9 +4,7 @@
 
 Power your backend with a hybrid service layer communicating across a message bus regardless of protocol.
 
-It exposes a your services across both a http, server-sent events and websocket, allowing varying clients to communicate to your infrastructure and multiple depoyed services across different zones using the central message bus as your communication backbone. Allowing both http requests to be treated with the same 
-principles as an event, simplifying both request and processing.
-
+It exposes a your services across both a http, server-sent events and websocket endpoints, allowing varying clients to communicate across your services over a message bus.
 
 ## Getting
 
