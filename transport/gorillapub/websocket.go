@@ -1,10 +1,12 @@
 package gorillapub
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,10 +53,18 @@ const (
 )
 
 var (
+	sabuMessageWSHeader  = []byte("0|")
+	anyMessageWSHeader   = []byte("1|")
 	websocketHeadMessage = []byte("Websocket Endpoint!\n")
 )
 
 type CustomHeader func(r *http.Request) http.Header
+
+type SocketInfo struct {
+	Query   url.Values
+	Path    string
+	Headers sabuhp.Header
+}
 
 func HttpUpgrader(
 	logger sabuhp.Logger,
@@ -74,6 +84,7 @@ func HttpUpgrader(
 		if custom != nil {
 			customHeaders = custom(request)
 		}
+
 		var socket, socketCreateErr = upgrader.Upgrade(writer, request, customHeaders)
 		if socketCreateErr != nil {
 			logger.Log(njson.MJSON("failed to upgrade websocket", func(event npkg.Encoder) {
@@ -98,7 +109,13 @@ func HttpUpgrader(
 			return
 		}
 
-		var socketHandler = hub.HandleSocket(socket)
+		var info = &SocketInfo{
+			Path:    request.URL.Path,
+			Query:   request.URL.Query(),
+			Headers: sabuhp.Header(request.Header.Clone()),
+		}
+
+		var socketHandler = hub.HandleSocket(socket, info)
 		if handleSocketErr := socketHandler.Run(); handleSocketErr != nil {
 			logger.Log(njson.MJSON("error out during socket handling", func(event npkg.Encoder) {
 				event.String("host", request.Host)
@@ -159,7 +176,13 @@ func UpgraderHandler(
 			return
 		}
 
-		var socketHandler = hub.HandleSocket(socket)
+		var info = &SocketInfo{
+			Path:    request.URL.Path,
+			Query:   request.URL.Query(),
+			Headers: sabuhp.Header(request.Header.Clone()),
+		}
+
+		var socketHandler = hub.HandleSocket(socket, info)
 		if handleSocketErr := socketHandler.Run(); handleSocketErr != nil {
 			logger.Log(njson.MJSON("error out during socket handling", func(event npkg.Encoder) {
 				event.Object("params", p)
@@ -190,9 +213,10 @@ type ConfigCreator func(config SocketConfig) SocketConfig
 type HubConfig struct {
 	Ctx           context.Context
 	Logger        sabuhp.Logger
-	Handler       sabuhp.MessageHandler
+	Handler       sabuhp.SocketHandler
 	OnClosure     managers.SocketNotification
 	OnOpen        managers.SocketNotification
+	Codec         sabuhp.Codec
 	ConfigHandler ConfigCreator
 }
 
@@ -213,13 +237,19 @@ type GorillaHub struct {
 // It allows the manager to delegate connections management to a suitable type (i.e GorillaHub)
 // and in the future other protocols/transport while the manager uses the central message bus transport
 // to communicate to other services and back to the connections.
-func ManagedGorillaHub(logger sabuhp.Logger, manager *managers.Manager, optionalConfigCreator ConfigCreator) *GorillaHub {
+func ManagedGorillaHub(
+	logger sabuhp.Logger,
+	manager *managers.Manager,
+	optionalConfigCreator ConfigCreator,
+	codec sabuhp.Codec,
+) *GorillaHub {
 	return NewGorillaHub(HubConfig{
 		Logger:        logger,
 		Ctx:           manager.Ctx(),
-		Handler:       manager.HandleSocketBytesMessage,
+		Handler:       manager.HandleSocketMessage,
 		OnClosure:     manager.ManageSocketClosed,
 		OnOpen:        manager.ManageSocketOpened,
+		Codec:         codec,
 		ConfigHandler: optionalConfigCreator,
 	})
 }
@@ -287,14 +317,16 @@ func (es *gorillaSockHandler) Run() error {
 
 // HandleSocket implements necessary logic to man and manage the lifecycle
 // of a new socket provided to the hub.
-func (gh *GorillaHub) HandleSocket(socket *websocket.Conn) SocketHandler {
+func (gh *GorillaHub) HandleSocket(socket *websocket.Conn, info *SocketInfo) SocketHandler {
 	var done = make(chan SocketHandler, 1)
 
 	gh.waiter.Add(1)
 	var doFunc = func() {
 		var config SocketConfig
 		config.Ctx = gh.ctx
+		config.Info = info
 		config.Conn = socket
+		config.Codec = gh.config.Codec
 		config.Logger = gh.config.Logger
 		config.Handler = gh.config.Handler
 
@@ -337,7 +369,7 @@ func (gh *GorillaHub) HandleSocket(socket *websocket.Conn) SocketHandler {
 		done <- &gorillaSockHandler{socket: gorilla}
 	}
 
-	// send function into work goroutiner.
+	// send function into work go-routine.
 	select {
 	case gh.doFunc <- doFunc:
 		break
@@ -401,6 +433,7 @@ type Endpoint interface {
 }
 
 type SocketConfig struct {
+	Info                  *SocketInfo
 	Buffer                int
 	MessageType           int
 	MaxMessageSize        int
@@ -410,6 +443,7 @@ type SocketConfig struct {
 	PingInterval          time.Duration // should be lesser than ReadMessageWait duration
 	Ctx                   context.Context
 	Logger                sabuhp.Logger
+	Codec                 sabuhp.Codec
 
 	// You can supply the websocket.Conn aif you wish to
 	// use an existing connection, the endpoint becomes
@@ -430,7 +464,7 @@ type SocketConfig struct {
 	// will cause the immediate closure of that socket and ending communication
 	// with the server. So unless your intention is to
 	// end the connection, handle the error yourself.
-	Handler sabuhp.MessageHandler
+	Handler sabuhp.SocketHandler
 }
 
 func (s *SocketConfig) clientConnect(ctx context.Context) error {
@@ -472,8 +506,14 @@ func (s *SocketConfig) ensure() {
 	if s.Conn == nil && s.Endpoint == nil {
 		panic("SocketConfig.Conn or SocketConfig.Endpoint must be provided")
 	}
+	if s.Info == nil {
+		panic("SocketConfig.Info must be provided")
+	}
 	if s.Logger == nil {
 		panic("SocketConfig.Logger must be provided")
+	}
+	if s.Codec == nil {
+		panic("SocketConfig.Codec must be provided")
 	}
 	if s.ReadMessageWait <= 0 {
 		s.ReadMessageWait = DefaultReadWait
@@ -506,9 +546,9 @@ type GorillaSocket struct {
 	isClient      bool
 	canceler      context.CancelFunc
 	ctx           context.Context
-	pending       chan []byte
-	send          chan []byte
-	deliver       chan []byte
+	pending       chan wsSend
+	send          chan wsSend
+	deliver       chan *sabuhp.Message
 	pendingWriter chan *sabuhp.SocketWriterTo
 	sendWriter    chan *sabuhp.SocketWriterTo
 	waiter        sync.WaitGroup
@@ -547,11 +587,9 @@ func GorillaClient(config SocketConfig) (*GorillaSocket, error) {
 	wg.socket = config.Conn
 	wg.config = &config
 	wg.id = nxid.New()
-	wg.pending = make(chan []byte, config.Buffer)
-	wg.send = make(chan []byte, config.Buffer)
-	wg.sendWriter = make(chan *sabuhp.SocketWriterTo, config.Buffer)
-	wg.pendingWriter = make(chan *sabuhp.SocketWriterTo, config.Buffer)
-	wg.deliver = make(chan []byte, config.Buffer)
+	wg.pending = make(chan wsSend, config.Buffer)
+	wg.send = make(chan wsSend, config.Buffer)
+	wg.deliver = make(chan *sabuhp.Message, config.Buffer)
 	wg.canceler = canceler
 	wg.ctx = localCtx
 	return &wg, nil
@@ -564,8 +602,9 @@ func NewGorillaSocket(config SocketConfig) *GorillaSocket {
 	wg.socket = config.Conn
 	wg.config = &config
 	wg.id = nxid.New()
-	wg.send = make(chan []byte, config.Buffer)
-	wg.deliver = make(chan []byte, config.Buffer)
+	wg.pending = make(chan wsSend, config.Buffer)
+	wg.send = make(chan wsSend, config.Buffer)
+	wg.deliver = make(chan *sabuhp.Message, config.Buffer)
 	wg.canceler = canceler
 	wg.ctx = localCtx
 	return &wg
@@ -585,17 +624,56 @@ func (g *GorillaSocket) Wait() {
 	g.waiter.Wait()
 }
 
+type wsSend struct {
+	Data   []byte
+	Meta   sabuhp.MessageMeta
+	writer *sabuhp.SocketWriterTo
+}
+
+// SendMessage delivers provided message into a batch of messages for delivery.
+//
+// Send provides no guarantee that your message will immediately be delivered
+// but while a connection remains open it guarantees such a message will remain.
+func (g *GorillaSocket) SendMessage(message *sabuhp.Message, timeout time.Duration) error {
+	var encodedMsg, encodedErr = g.config.Codec.Encode(message)
+	if encodedErr != nil {
+		return nerror.WrapOnly(encodedErr)
+	}
+
+	var timeoutChan <-chan time.Time
+	if timeout > 0 {
+		timeoutChan = time.After(timeout)
+	}
+
+	select {
+	case g.send <- wsSend{
+		Data:   encodedMsg,
+		Meta:   message.MessageMeta,
+		writer: nil,
+	}:
+		return nil
+	case <-timeoutChan: // nil channel will be ignored
+		return nerror.New("message delivery timeout")
+	case <-g.config.Ctx.Done():
+		return nerror.WrapOnly(g.config.Ctx.Err())
+	}
+}
+
 // Send delivers provided message into a batch of messages for delivery.
 //
 // Send provides no guarantee that your message will immediately be delivered
 // but while a connection remains open it guarantees such a message will remain.
-func (g *GorillaSocket) Send(message []byte, timeout time.Duration) error {
+func (g *GorillaSocket) Send(message []byte, meta sabuhp.MessageMeta, timeout time.Duration) error {
 	var timeoutChan <-chan time.Time
 	if timeout > 0 {
 		timeoutChan = time.After(timeout)
 	}
 	select {
-	case g.send <- message:
+	case g.send <- wsSend{
+		Data:   message,
+		Meta:   meta,
+		writer: nil,
+	}:
 		return nil
 	case <-timeoutChan: // nil channel will be ignored
 		return nerror.New("message delivery timeout")
@@ -608,7 +686,7 @@ func (g *GorillaSocket) Send(message []byte, timeout time.Duration) error {
 //
 // SendWriter provides no guarantee that your message will immediately be delivered
 // but while a connection remains open it guarantees such a message will remain.
-func (g *GorillaSocket) SendWriter(message io.WriterTo, timeout time.Duration) sabuhp.ErrorWaiter {
+func (g *GorillaSocket) SendWriter(message io.WriterTo, meta sabuhp.MessageMeta, timeout time.Duration) sabuhp.ErrorWaiter {
 	var socketWriter = sabuhp.NewSocketWriterTo(message)
 
 	var timeoutChan <-chan time.Time
@@ -617,7 +695,11 @@ func (g *GorillaSocket) SendWriter(message io.WriterTo, timeout time.Duration) s
 	}
 
 	select {
-	case g.sendWriter <- socketWriter:
+	case g.send <- wsSend{
+		Data:   nil,
+		Meta:   meta,
+		writer: socketWriter,
+	}:
 		return socketWriter
 	case <-timeoutChan: // nil channel will be ignored
 		socketWriter.Abort(nerror.New("message delivery timeout"))
@@ -649,14 +731,6 @@ func (g *GorillaSocket) Stat() sabuhp.SocketStat {
 	stat.Handled = atomic.LoadInt64(&g.handled)
 	stat.Received = atomic.LoadInt64(&g.received)
 	return stat
-}
-
-// SendChannel gives you access to the send channel.
-//
-// Be careful to only use once this socket has being closed
-// it is internally managed by the socket till closure.
-func (g *GorillaSocket) SendChannel() chan []byte {
-	return g.send
 }
 
 func (g *GorillaSocket) Start() {
@@ -728,7 +802,7 @@ loopCall:
 				g.config.Logger.Log(njson.MJSON("error handling message from handler", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.Object("message", message)
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -754,6 +828,8 @@ func (g *GorillaSocket) manageReads() {
 		_ = g.socket.SetReadDeadline(time.Now().Add(g.config.ReadMessageWait))
 		return nil
 	})
+
+	var info = g.config.Info
 
 	for {
 		if g.isReconnecting() {
@@ -789,7 +865,76 @@ func (g *GorillaSocket) manageReads() {
 			break
 		}
 
-		g.deliver <- message
+		// get type marker
+		if !bytes.HasPrefix(message, sabuMessageWSHeader) && !bytes.HasPrefix(message, anyMessageWSHeader) {
+			var payload = &sabuhp.Message{
+				Topic:    info.Path,
+				ID:       nxid.New(),
+				Delivery: sabuhp.SendToAll,
+				MessageMeta: sabuhp.MessageMeta{
+					ContentType:     "any",
+					Query:           info.Query,
+					Form:            url.Values{},
+					Headers:         sabuhp.Header{},
+					Cookies:         sabuhp.ReadCookies(info.Headers, ""),
+					MultipartReader: nil,
+				},
+				Payload:             message,
+				Metadata:            map[string]string{},
+				Params:              map[string]string{},
+				LocalPayload:        nil,
+				OverridingTransport: nil,
+			}
+
+			g.deliver <- payload
+			continue
+		}
+
+		// get type marker
+		if bytes.HasPrefix(message, anyMessageWSHeader) {
+			var rest = bytes.TrimPrefix(message, anyMessageWSHeader)
+			var payload = &sabuhp.Message{
+				Topic:    info.Path,
+				ID:       nxid.New(),
+				Delivery: sabuhp.SendToAll,
+				MessageMeta: sabuhp.MessageMeta{
+					ContentType:     "any",
+					Query:           info.Query,
+					Form:            url.Values{},
+					Headers:         sabuhp.Header{},
+					Cookies:         sabuhp.ReadCookies(info.Headers, ""),
+					MultipartReader: nil,
+				},
+				Payload:             rest,
+				Metadata:            map[string]string{},
+				Params:              map[string]string{},
+				LocalPayload:        nil,
+				OverridingTransport: nil,
+			}
+
+			g.deliver <- payload
+			continue
+		}
+
+		var rest = bytes.TrimPrefix(message, sabuMessageWSHeader)
+		var deliveredMessage, deliveredErr = g.config.Codec.Decode(rest)
+		if deliveredErr != nil {
+			g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
+				event.Bytes("message", message)
+				event.Bool("is_client", g.isClient)
+				event.String("socket_id", g.id.String())
+				event.String("socket_network", g.socket.RemoteAddr().Network())
+				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+				event.String("socket_local_addr", g.socket.LocalAddr().String())
+				event.String("socket_local_network", g.socket.LocalAddr().Network())
+				event.String("socket_sub_protocols", g.socket.Subprotocol())
+				event.String("error", nerror.WrapOnly(deliveredErr).Error())
+			}))
+
+			continue
+		}
+
+		g.deliver <- deliveredMessage
 	}
 
 	g.config.Logger.Log(njson.MJSON("closing read loop", func(event npkg.Encoder) {
@@ -959,7 +1104,7 @@ runloop:
 			g.config.Logger.Log(njson.MJSON("received message on pending", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
-				event.String("message", string(message))
+				event.String("message", string(message.Data))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 				event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -972,7 +1117,7 @@ runloop:
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -981,185 +1126,20 @@ runloop:
 					event.String("error", nerror.WrapOnly(setTimeErr).Error())
 				}))
 			}
+
 			var writer, writerErr = g.socket.NextWriter(g.config.MessageType)
 			if writerErr != nil {
+				var wrapped = nerror.WrapOnly(writerErr)
 				g.config.Logger.Log(njson.MJSON("error creating new writer on socket", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				_ = writer.Close()
-
-				break runloop
-			}
-
-			var _, sendErr = writer.Write(message)
-			if sendErr != nil {
-				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				_ = writer.Close()
-				break runloop
-			}
-
-			if closingErr := writer.Close(); closingErr != nil {
-				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				break runloop
-			}
-		case messageWriter := <-g.pendingWriter:
-			// this case should rearly happen, only when a send succeeded
-			// into the goroutine but the client disconnecting and was
-			// about to reconnect.
-
-			g.config.Logger.Log(njson.MJSON("received message on pending", func(event npkg.Encoder) {
-				event.Bool("is_client", g.isClient)
-				event.String("socket_id", g.id.String())
-				event.String("socket_network", g.socket.RemoteAddr().Network())
-				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-				event.String("socket_local_addr", g.socket.LocalAddr().String())
-				event.String("socket_local_network", g.socket.LocalAddr().Network())
-				event.String("socket_sub_protocols", g.socket.Subprotocol())
-			}))
-
-			atomic.AddInt64(&g.sent, 1)
-			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
-				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(setTimeErr).Error())
-				}))
-			}
-			var writer, writerErr = g.socket.NextWriter(g.config.MessageType)
-			if writerErr != nil {
-				g.config.Logger.Log(njson.MJSON("error creating new writer on socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				_ = writer.Close()
-
-				break runloop
-			}
-
-			var sentCount, sendErr = messageWriter.WriteTo(writer)
-			if sendErr != nil {
-				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.Int64("total_sent", sentCount)
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				_ = writer.Close()
-				break runloop
-			}
-
-			if closingErr := writer.Close(); closingErr != nil {
-				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				break runloop
-			}
-		case messageWriter := <-g.sendWriter:
-			if g.isReconnecting() {
-				g.pendingWriter <- messageWriter
-				g.config.Logger.Log(njson.MJSON("pushed into pending", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-				}))
-				continue runloop
-			}
-
-			g.config.Logger.Log(njson.MJSON("received write", func(event npkg.Encoder) {
-				event.Bool("is_client", g.isClient)
-				event.String("socket_id", g.id.String())
-				event.String("socket_network", g.socket.RemoteAddr().Network())
-				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-				event.String("socket_local_addr", g.socket.LocalAddr().String())
-				event.String("socket_local_network", g.socket.LocalAddr().Network())
-				event.String("socket_sub_protocols", g.socket.Subprotocol())
-			}))
-
-			atomic.AddInt64(&g.sent, 1)
-			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
-				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(setTimeErr).Error())
-				}))
-			}
-			var writer, writerErr = g.socket.NextWriter(g.config.MessageType)
-			if writerErr != nil {
-				g.config.Logger.Log(njson.MJSON("error creating new writer on socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
+					event.Error("error", wrapped)
 				}))
 
 				_ = writer.Close()
@@ -1168,24 +1148,22 @@ runloop:
 				if g.attemptReconnection() {
 					continue runloop
 				}
+
 				break runloop
 			}
 
-			// attempt to delivery message and those pending
-			pendingMessages = len(g.send)
-
-			var sentCount, sendErr = messageWriter.WriteTo(writer)
-			if sendErr != nil {
-				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+			if sendErr := g.messageToWriter(message, writer); sendErr != nil {
+				var wrapped = nerror.WrapOnly(writerErr)
+				g.config.Logger.Log(njson.MJSON("error writing content into writer", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
-					event.Int64("total_sent", sentCount)
 					event.String("socket_id", g.id.String())
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
+					event.Error("error", wrapped)
 				}))
 
 				_ = writer.Close()
@@ -1194,51 +1172,28 @@ runloop:
 				if g.attemptReconnection() {
 					continue runloop
 				}
+
 				break runloop
-			}
-
-			for i := 0; i < pendingMessages; i++ {
-				var pendingMsgWriter = <-g.sendWriter
-				var sentCount, sendErr = pendingMsgWriter.WriteTo(writer)
-				if sendErr != nil {
-					g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
-						event.Bool("is_client", g.isClient)
-						event.String("socket_id", g.id.String())
-						event.Int64("total_sent", sentCount)
-						event.String("socket_network", g.socket.RemoteAddr().Network())
-						event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-						event.String("socket_local_addr", g.socket.LocalAddr().String())
-						event.String("socket_local_network", g.socket.LocalAddr().Network())
-						event.String("socket_sub_protocols", g.socket.Subprotocol())
-						event.String("error", nerror.WrapOnly(writerErr).Error())
-					}))
-
-					_ = writer.Close()
-
-					// attempt reconnection
-					if g.attemptReconnection() {
-						continue runloop
-					}
-					break runloop
-				}
 			}
 
 			if closingErr := writer.Close(); closingErr != nil {
 				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
+					event.String("error", nerror.WrapOnly(closingErr).Error())
 				}))
 
 				// attempt reconnection
 				if g.attemptReconnection() {
 					continue runloop
 				}
+
 				break runloop
 			}
 		case message := <-g.send:
@@ -1247,7 +1202,7 @@ runloop:
 				g.config.Logger.Log(njson.MJSON("pushed into pending", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1260,7 +1215,7 @@ runloop:
 			g.config.Logger.Log(njson.MJSON("received write", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
-				event.String("message", string(message))
+				event.String("message", string(message.Data))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 				event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1273,7 +1228,7 @@ runloop:
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1282,12 +1237,13 @@ runloop:
 					event.String("error", nerror.WrapOnly(setTimeErr).Error())
 				}))
 			}
+
 			var writer, writerErr = g.socket.NextWriter(g.config.MessageType)
 			if writerErr != nil {
 				g.config.Logger.Log(njson.MJSON("error creating new writer on socket", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1300,59 +1256,74 @@ runloop:
 
 				// attempt reconnection
 				if g.attemptReconnection() {
+
+					// add into pending for a retry
+					g.pending <- message
+
 					continue runloop
 				}
+				break runloop
+			}
+
+			if sendErr := g.messageToWriter(message, writer); sendErr != nil {
+				var wrapped = nerror.WrapOnly(writerErr)
+				g.config.Logger.Log(njson.MJSON("error writing content into writer", func(event npkg.Encoder) {
+					event.Bool("is_client", g.isClient)
+					event.String("socket_id", g.id.String())
+					event.String("message", string(message.Data))
+					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.String("socket_local_network", g.socket.LocalAddr().Network())
+					event.String("socket_sub_protocols", g.socket.Subprotocol())
+					event.Error("error", wrapped)
+				}))
+
+				_ = writer.Close()
+
+				// attempt reconnection
+				if g.attemptReconnection() {
+
+					// add into pending for a retry
+					g.pending <- message
+
+					continue runloop
+				}
+
 				break runloop
 			}
 
 			// attempt to delivery message and those pending
 			pendingMessages = len(g.send)
 
-			var _, sendErr = writer.Write(message)
-			if sendErr != nil {
-				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
-					event.Bool("is_client", g.isClient)
-					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
-					event.String("socket_network", g.socket.RemoteAddr().Network())
-					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
-					event.String("socket_local_addr", g.socket.LocalAddr().String())
-					event.String("socket_local_network", g.socket.LocalAddr().Network())
-					event.String("socket_sub_protocols", g.socket.Subprotocol())
-					event.String("error", nerror.WrapOnly(writerErr).Error())
-				}))
-
-				_ = writer.Close()
-
-				// attempt reconnection
-				if g.attemptReconnection() {
-					continue runloop
-				}
-				break runloop
-			}
-
 			for i := 0; i < pendingMessages; i++ {
 				var pendingMsg = <-g.send
-				var _, sendErr = writer.Write(pendingMsg)
-				if sendErr != nil {
-					g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+
+				if sendErr := g.messageToWriter(pendingMsg, writer); sendErr != nil {
+					var wrapped = nerror.WrapOnly(writerErr)
+					g.config.Logger.Log(njson.MJSON("error writing content into writer", func(event npkg.Encoder) {
 						event.Bool("is_client", g.isClient)
 						event.String("socket_id", g.id.String())
-						event.String("message", string(pendingMsg))
+						event.String("message", string(message.Data))
 						event.String("socket_network", g.socket.RemoteAddr().Network())
 						event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 						event.String("socket_local_addr", g.socket.LocalAddr().String())
 						event.String("socket_local_network", g.socket.LocalAddr().Network())
 						event.String("socket_sub_protocols", g.socket.Subprotocol())
-						event.String("error", nerror.WrapOnly(writerErr).Error())
+						event.Error("error", wrapped)
 					}))
 
 					_ = writer.Close()
 
 					// attempt reconnection
 					if g.attemptReconnection() {
+
+						// add into pending for a retry
+						g.pending <- message
+
 						continue runloop
 					}
+
 					break runloop
 				}
 			}
@@ -1361,7 +1332,7 @@ runloop:
 				g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
-					event.String("message", string(message))
+					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1434,4 +1405,70 @@ runloop:
 
 	// if we ever get here, then end socket.
 	g.canceler()
+}
+
+func (g *GorillaSocket) messageToWriter(message wsSend, writer io.Writer) error {
+	var writeErr error
+	if message.Meta.ContentType == sabuhp.MessageContentType {
+		_, writeErr = writer.Write(sabuMessageWSHeader)
+	} else {
+		_, writeErr = writer.Write(anyMessageWSHeader)
+	}
+
+	if writeErr != nil {
+		var wrapped = nerror.WrapOnly(writeErr)
+		g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+			event.Bool("is_client", g.isClient)
+			event.String("socket_id", g.id.String())
+			event.String("message", string(message.Data))
+			event.String("socket_network", g.socket.RemoteAddr().Network())
+			event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+			event.String("socket_local_addr", g.socket.LocalAddr().String())
+			event.String("socket_local_network", g.socket.LocalAddr().Network())
+			event.String("socket_sub_protocols", g.socket.Subprotocol())
+			event.Error("error", wrapped)
+		}))
+		return wrapped
+	}
+
+	if message.writer == nil {
+		var _, sendErr = writer.Write(message.Data)
+		if sendErr != nil {
+			var wrapped = nerror.WrapOnly(sendErr)
+			g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+				event.Bool("is_client", g.isClient)
+				event.String("socket_id", g.id.String())
+				event.String("message", string(message.Data))
+				event.String("socket_network", g.socket.RemoteAddr().Network())
+				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+				event.String("socket_local_addr", g.socket.LocalAddr().String())
+				event.String("socket_local_network", g.socket.LocalAddr().Network())
+				event.String("socket_sub_protocols", g.socket.Subprotocol())
+				event.Error("error", wrapped)
+			}))
+			return wrapped
+		}
+
+		return nil
+	}
+
+	var _, sendErr = message.writer.WriteTo(writer)
+	if sendErr != nil {
+		var wrapped = nerror.WrapOnly(sendErr)
+		g.config.Logger.Log(njson.MJSON("error writing to socket", func(event npkg.Encoder) {
+			event.Bool("is_client", g.isClient)
+			event.String("socket_id", g.id.String())
+			event.String("message", string(message.Data))
+			event.String("socket_network", g.socket.RemoteAddr().Network())
+			event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+			event.String("socket_local_addr", g.socket.LocalAddr().String())
+			event.String("socket_local_network", g.socket.LocalAddr().Network())
+			event.String("socket_sub_protocols", g.socket.Subprotocol())
+			event.Error("error", wrapped)
+		}))
+
+		return wrapped
+	}
+
+	return nil
 }

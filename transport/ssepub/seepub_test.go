@@ -52,7 +52,9 @@ func TestNewSSEHub(t *testing.T) {
 			return nil
 		},
 	}
+
 	var codec = &codecs.JsonCodec{}
+
 	var managerConfig = managers.ManagerConfig{
 		ID:        nxid.New(),
 		Transport: transport,
@@ -62,22 +64,19 @@ func TestNewSSEHub(t *testing.T) {
 	}
 	var manager = managers.NewManager(managerConfig)
 
-	var sseServer = ManagedSSEServer(controlCtx, logger, manager, nil)
+	var sseServer = ManagedSSEServer(controlCtx, logger, manager, nil, codec)
 	require.NotNil(t, sseServer)
 
 	var httpServer = httptest.NewServer(sseServer)
 
-	var clientHub = NewSSEHub(controlCtx, 5, httpServer.Client(), logger, linearBackOff)
+	var clientHub = NewSSEHub(controlCtx, 5, httpServer.Client(), codec, logger, linearBackOff)
 
 	var recvMsg = make(chan *sabuhp.Message, 1)
 	var socket, socketErr = clientHub.Get(
-		func(message []byte, socket *SSEClient) error {
+		func(message *sabuhp.Message, socket *SSEClient) error {
 			require.NotEmpty(t, message)
 			require.NotNil(t, socket)
-
-			var decoded, decodeErr = codec.Decode(message)
-			require.NoError(t, decodeErr)
-			recvMsg <- decoded
+			recvMsg <- message
 			return nil
 		},
 		nxid.New(),
@@ -87,21 +86,17 @@ func TestNewSSEHub(t *testing.T) {
 	require.NoError(t, socketErr)
 	require.NotNil(t, socket)
 
-	var subscribeMessage, subErr = testingutils.EncodedMsg(codec, sabuhp.SUBSCRIBE, "hello", "me")
-	require.NoError(t, subErr)
-	require.NotEmpty(t, subscribeMessage)
-
-	var _, sendErr = socket.Send("POST", subscribeMessage, 0)
+	var subscribeMessage = testingutils.Msg(sabuhp.SUBSCRIBE, "hello", "me")
+	var sendErr = socket.Send("POST", &subscribeMessage, 0)
 	require.NoError(t, sendErr)
 
 	<-addedListener
 	require.Len(t, listeners["hello"], 1)
 
-	var topicMessage, topicErr = testingutils.EncodedMsg(codec, "hello", "alex", "me")
-	require.NoError(t, topicErr)
+	var topicMessage = testingutils.Msg("hello", "alex", "me")
 	require.NotEmpty(t, topicMessage)
 
-	var _, sendErr2 = socket.Send("POST", topicMessage, 0)
+	var sendErr2 = socket.Send("POST", &topicMessage, 0)
 	require.NoError(t, sendErr2)
 
 	var okMessage = <-recvMsg

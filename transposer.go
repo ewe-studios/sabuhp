@@ -6,13 +6,220 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/influx6/npkg/nerror"
+	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nxid"
 )
 
-const MessageContentType = "application/x-event-message"
+var _ Translator = (*CodecTranslator)(nil)
+
+type CodecTranslator struct {
+	Codec  Codec
+	Logger Logger
+}
+
+func NewCodecTranslator(codec Codec, logger Logger) *CodecTranslator {
+	return &CodecTranslator{Codec: codec, Logger: logger}
+}
+
+func (r *CodecTranslator) TranslateWriter(res http.ResponseWriter, w io.WriterTo, m MessageMeta) error {
+	var stack = njson.Log(r.Logger)
+	defer njson.ReleaseLogStack(stack)
+
+	// if the content type is not MessageContentType ("application/x-event-message")
+	// it means the user does not intend to write the whole message structure as the
+	// response, so:
+	// 1. Copy out the content type
+	// 2. Write the payload if any as the response
+	if m.ContentType != MessageContentType {
+		stack.New().
+			LInfo().
+			Message("message type for response is not application/x-event-message").
+			String("content-type", m.ContentType).
+			End()
+
+		res.Header().Set("Content-Type", m.ContentType)
+	} else {
+		res.Header().Set("Content-Type", MessageContentType)
+	}
+
+	if m.SuggestedStatusCode > 0 {
+		res.WriteHeader(m.SuggestedStatusCode)
+	} else {
+		res.WriteHeader(http.StatusOK)
+	}
+
+	if written, err := w.WriteTo(res); err != nil {
+		var wrappedErr = nerror.WrapOnly(err)
+		stack.New().
+			LError().
+			Message("failed to send response message").
+			Int64("written", written).
+			Error("error", wrappedErr).
+			End()
+		return wrappedErr
+	}
+
+	return nil
+}
+
+func (r *CodecTranslator) TranslateBytes(res http.ResponseWriter, data []byte, m MessageMeta) error {
+	var stack = njson.Log(r.Logger)
+	defer njson.ReleaseLogStack(stack)
+
+	// if the content type is not MessageContentType ("application/x-event-message")
+	// it means the user does not intend to write the whole message structure as the
+	// response, so:
+	// 1. Copy out the content type
+	// 2. Write the payload if any as the response
+	if m.ContentType != MessageContentType {
+		stack.New().
+			LInfo().
+			Bytes("data", data).
+			Message("message type for response is not application/x-event-message").
+			String("content-type", m.ContentType).
+			End()
+
+		res.Header().Set("Content-Type", m.ContentType)
+	} else {
+		res.Header().Set("Content-Type", MessageContentType)
+	}
+
+	if m.SuggestedStatusCode > 0 {
+		res.WriteHeader(m.SuggestedStatusCode)
+	} else {
+		res.WriteHeader(http.StatusOK)
+	}
+
+	if written, err := res.Write(data); err != nil {
+		var wrappedErr = nerror.WrapOnly(err)
+		stack.New().
+			LError().
+			Message("failed to send response message").
+			Bytes("data", data).
+			Int("data", written).
+			Error("error", wrappedErr).
+			End()
+		return wrappedErr
+	}
+
+	return nil
+}
+
+func (r *CodecTranslator) Translate(res http.ResponseWriter, m *Message) error {
+	var stack = njson.Log(r.Logger)
+	defer njson.ReleaseLogStack(stack)
+
+	// if the content type is not MessageContentType ("application/x-event-message")
+	// it means the user does not intend to write the whole message structure as the
+	// response, so:
+	// 1. Copy out the content type
+	// 2. Write the payload if any as the response
+	if m.ContentType != MessageContentType {
+		stack.New().
+			LInfo().
+			Message("message type for response is not application/x-event-message").
+			String("content-type", m.ContentType).
+			Object("message", m).
+			End()
+
+		res.Header().Set("Content-Type", m.ContentType)
+
+		if m.SuggestedStatusCode > 0 {
+			res.WriteHeader(m.SuggestedStatusCode)
+		} else {
+			res.WriteHeader(http.StatusOK)
+		}
+
+		if written, err := res.Write(m.Payload); err != nil {
+			var wrappedErr = nerror.WrapOnly(err)
+			stack.New().
+				LError().
+				Message("failed to send response message").
+				Int("written", written).
+				Error("error", wrappedErr).
+				End()
+			return wrappedErr
+		}
+		return nil
+	}
+
+	res.Header().Set("Content-Type", MessageContentType)
+	if m.SuggestedStatusCode > 0 {
+		res.WriteHeader(m.SuggestedStatusCode)
+	} else {
+		res.WriteHeader(http.StatusOK)
+	}
+
+	var encoded, encodedErr = r.Codec.Encode(m)
+	if encodedErr != nil {
+		return nerror.WrapOnly(encodedErr)
+	}
+
+	if written, err := res.Write(encoded); err != nil {
+		var wrappedErr = nerror.WrapOnly(err)
+		stack.New().
+			LError().
+			Message("failed to send response message").
+			Int("written", written).
+			Error("error", wrappedErr).
+			End()
+		return nil
+	}
+
+	return nil
+}
+
+type WrappedCodecTransposer struct {
+	WrappedCodec WrappedCodec
+	Codec        Codec
+	Logger       Logger
+}
+
+func NewWrappedCodecTransposer(codec Codec, wrappedCodec WrappedCodec, logger Logger) *WrappedCodecTransposer {
+	return &WrappedCodecTransposer{Codec: codec, WrappedCodec: wrappedCodec, Logger: logger}
+}
+
+func (r *WrappedCodecTransposer) Transpose(data []byte) (*Message, *WrappedPayload, error) {
+	// decode data into wrapped object
+	var wrappedPayload, wrappedPayloadErr = r.WrappedCodec.Decode(data)
+	if wrappedPayloadErr != nil {
+		return nil, nil, nerror.WrapOnly(wrappedPayloadErr)
+	}
+
+	// check if it's a payload content type
+	if wrappedPayload.ContentType != MessageContentType {
+		return &Message{
+			Topic:    "",
+			ID:       nxid.New(),
+			Delivery: SendToAll,
+			MessageMeta: MessageMeta{
+				ContentType:     wrappedPayload.ContentType,
+				Query:           url.Values{},
+				Form:            url.Values{},
+				Headers:         Header{},
+				Cookies:         nil,
+				MultipartReader: nil,
+			},
+			Payload:             wrappedPayload.Payload,
+			Metadata:            map[string]string{},
+			Params:              map[string]string{},
+			LocalPayload:        nil,
+			OverridingTransport: nil,
+		}, wrappedPayload, nil
+	}
+
+	var message, messageErr = r.Codec.Decode(wrappedPayload.Payload)
+	if messageErr != nil {
+		return nil, wrappedPayload, nerror.WrapOnly(messageErr)
+	}
+	return message, wrappedPayload, nil
+}
+
+var _ Transposer = (*CodecTransposer)(nil)
 
 type CodecTransposer struct {
 	Codec       Codec
@@ -20,8 +227,8 @@ type CodecTransposer struct {
 	MaxBodySize int64
 }
 
-func NewCodecTransposer(codec Codec, logger Logger) *CodecTransposer {
-	return &CodecTransposer{Codec: codec, Logger: logger}
+func NewCodecTransposer(codec Codec, logger Logger, maxBody int64) *CodecTransposer {
+	return &CodecTransposer{Codec: codec, Logger: logger, MaxBodySize: maxBody}
 }
 
 func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message, error) {
@@ -53,17 +260,20 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 
 	if isFormOrMultiPart {
 		return &Message{
-			ID:                  nxid.New(),
-			Topic:               "",
-			FromAddr:            req.RemoteAddr,
-			Delivery:            SendToAll,
-			Payload:             nil,
-			Query:               req.URL.Query(),
-			Form:                req.Form,
-			MultipartReader:     multiPartReader,
+			ID:       nxid.New(),
+			Topic:    "",
+			FromAddr: req.RemoteAddr,
+			Delivery: SendToAll,
+			Payload:  nil,
+			MessageMeta: MessageMeta{
+				Headers:         Header(req.Header.Clone()),
+				Cookies:         ReadCookies(Header(req.Header), ""),
+				Query:           req.URL.Query(),
+				Form:            req.Form,
+				MultipartReader: multiPartReader,
+				ContentType:     contentType,
+			},
 			Metadata:            map[string]string{},
-			Headers:             Header(req.Header.Clone()),
-			Cookies:             ReadCookies(Header(req.Header), ""),
 			Params:              params,
 			LocalPayload:        nil,
 			OverridingTransport: nil,
@@ -79,18 +289,21 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 	// assume the body is the message payload.
 	if !strings.Contains(contentTypeLower, MessageContentType) {
 		return &Message{
-			Topic:               "",
-			ID:                  nxid.New(),
-			FromAddr:            req.RemoteAddr,
-			Delivery:            SendToAll,
+			Topic:    "",
+			ID:       nxid.New(),
+			FromAddr: req.RemoteAddr,
+			Delivery: SendToAll,
+			MessageMeta: MessageMeta{
+				MultipartReader: nil,
+				Headers:         Header(req.Header.Clone()),
+				Cookies:         ReadCookies(Header(req.Header), ""),
+				Form:            req.Form,
+				Query:           req.URL.Query(),
+				ContentType:     contentType,
+			},
 			Payload:             content.Bytes(),
-			Form:                req.Form,
-			Query:               req.URL.Query(),
 			Metadata:            map[string]string{},
-			Headers:             Header(req.Header.Clone()),
-			Cookies:             ReadCookies(Header(req.Header), ""),
 			Params:              params,
-			MultipartReader:     nil,
 			LocalPayload:        nil,
 			OverridingTransport: nil,
 		}, nil
@@ -103,6 +316,10 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 
 	message.Cookies = ReadCookies(Header(req.Header), "")
 	message.Headers = Header(req.Header.Clone())
+
+	if len(message.ContentType) == 0 {
+		message.ContentType = contentType
+	}
 
 	for k, v := range params {
 		message.Params[k] = v

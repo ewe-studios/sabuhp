@@ -63,12 +63,19 @@ func TestNewHub(t *testing.T) {
 		return nil
 	}))
 
-	var sseServer = ManagedHttpServlet(controlCtx, logger, sabuhp.NewCodecTransposer(codec, logger), manager, nil)
-	require.NotNil(t, sseServer)
+	var servletServer = ManagedHttpServlet(
+		controlCtx,
+		logger,
+		sabuhp.NewCodecTransposer(codec, logger, -1),
+		sabuhp.NewCodecTranslator(codec, logger),
+		manager,
+		nil,
+	)
+	require.NotNil(t, servletServer)
 
-	var httpServer = httptest.NewServer(sseServer)
+	var httpServer = httptest.NewServer(servletServer)
 
-	var clientHub = NewHub(controlCtx, 5, httpServer.Client(), logger, linearBackOff)
+	var clientHub = NewHub(controlCtx, 5, codec, httpServer.Client(), logger, linearBackOff)
 
 	var socket, socketErr = clientHub.For(
 		nxid.New(),
@@ -81,19 +88,10 @@ func TestNewHub(t *testing.T) {
 	<-addedListener
 	require.Len(t, listeners["hello"], 1)
 
-	var topicMessage, topicErr = testingutils.EncodedMsg(codec, "hello", "alex", "me")
-	require.NoError(t, topicErr)
-	require.NotEmpty(t, topicMessage)
-
-	var header = sabuhp.Header{}
-	header.Set("Content-Type", sabuhp.MessageContentType)
-
-	var response, sendErr2 = socket.Send("POST", topicMessage, 0, header)
+	var topicMessage = testingutils.Msg("hello", "alex", "me")
+	var response, sendErr2 = socket.Send("POST", &topicMessage, 0)
 	require.NoError(t, sendErr2)
-
-	var messageReceived, messageErr = codec.Decode(response)
-	require.NoError(t, messageErr)
-	require.Equal(t, "alex", string(messageReceived.Payload))
+	require.Equal(t, "alex", string(response.Payload))
 
 	controlStopFunc()
 

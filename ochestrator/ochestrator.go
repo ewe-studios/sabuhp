@@ -28,6 +28,10 @@ import (
 	"github.com/influx6/sabuhp/transport/ssepub"
 )
 
+const (
+	DefaultMaxSize = 4096
+)
+
 var (
 	upgrader = &websocket.Upgrader{
 		HandshakeTimeout:  time.Second * 5,
@@ -63,18 +67,34 @@ func GobCodec(
 	return &codecs.GobCodec{}, nil
 }
 
+type TranslatorCreator func(
+	ctx context.Context,
+	logger sabuhp.Logger,
+	codec sabuhp.Codec,
+) (sabuhp.Translator, error)
+
+func DefaultTranslator(
+	_ context.Context,
+	logger sabuhp.Logger,
+	codec sabuhp.Codec,
+) (sabuhp.Translator, error) {
+	return sabuhp.NewCodecTranslator(codec, logger), nil
+}
+
 type TransposerCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
+	maxSize int64,
 ) (sabuhp.Transposer, error)
 
 func DefaultTransposer(
 	_ context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
+	maxSize int64,
 ) (sabuhp.Transposer, error) {
-	return sabuhp.NewCodecTransposer(codec, logger), nil
+	return sabuhp.NewCodecTransposer(codec, logger, DefaultMaxSize), nil
 }
 
 type TransportCreator func(
@@ -102,13 +122,10 @@ func DefaultRedisTransportWithOptions(
 	redisOption redis.Options,
 ) (sabuhp.Transport, error) {
 	var redisTransport, redisTransportErr = redispub.NewRedisPubSub(redispub.PubSubConfig{
-		Logger:                    logger,
-		Ctx:                       ctx,
-		Codec:                     codec,
-		Redis:                     redisOption,
-		MaxWaitForSubConfirmation: 0,
-		StreamMessageInterval:     0,
-		MaxWaitForSubRetry:        0,
+		Logger: logger,
+		Ctx:    ctx,
+		Codec:  codec,
+		Redis:  redisOption,
 	})
 	if redisTransportErr != nil {
 		return nil, nerror.WrapOnly(redisTransportErr)
@@ -130,6 +147,7 @@ type RouterCreator func(
 	logger sabuhp.Logger,
 	manager *managers.Manager,
 	transposer sabuhp.Transposer,
+	translator sabuhp.Translator,
 ) (*radar.Mux, error)
 
 func DefaultRouter(
@@ -137,10 +155,11 @@ func DefaultRouter(
 	logger sabuhp.Logger,
 	manager *managers.Manager,
 	transposer sabuhp.Transposer,
+	translator sabuhp.Translator,
 ) (*radar.Mux, error) {
 	return DefaultRouterWithNotFound(ctx, logger, manager, sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
 		http.NotFound(writer, request)
-	}), transposer)
+	}), transposer, translator)
 }
 
 func DefaultRouterWithNotFound(
@@ -149,6 +168,7 @@ func DefaultRouterWithNotFound(
 	manager *managers.Manager,
 	notFound sabuhp.Handler,
 	transposer sabuhp.Transposer,
+	translator sabuhp.Translator,
 ) (*radar.Mux, error) {
 	return radar.NewMux(radar.MuxConfig{
 		RootPath:   "",
@@ -156,6 +176,7 @@ func DefaultRouterWithNotFound(
 		Logger:     logger,
 		Manager:    manager,
 		Transposer: transposer,
+		Translator: translator,
 		NotFound: sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
 			var logStack = njson.Log(logger)
 			defer njson.ReleaseLogStack(logStack)
@@ -307,16 +328,18 @@ func DefaultHTTPServer(
 type GorillaHubCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	codec sabuhp.Codec,
 	transport sabuhp.Transport,
 ) (*gorillapub.GorillaHub, sabuhp.Handler, error)
 
 func DefaultGorillaHub(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	codec sabuhp.Codec,
 	transport sabuhp.Transport,
 ) (*gorillapub.GorillaHub, sabuhp.Handler, error) {
 	if manager, isManager := transport.(*managers.Manager); isManager {
-		var wsServer = gorillapub.ManagedGorillaHub(logger, manager, nil)
+		var wsServer = gorillapub.ManagedGorillaHub(logger, manager, nil, codec)
 		var wsHandler = gorillapub.UpgraderHandler(logger, wsServer, upgrader, nil)
 		return wsServer, wsHandler, nil
 	}
@@ -326,16 +349,18 @@ func DefaultGorillaHub(
 type SSEServerCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	codec sabuhp.Codec,
 	transport sabuhp.Transport,
 ) (*ssepub.SSEServer, error)
 
 func DefaultSSEServer(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	codec sabuhp.Codec,
 	transport sabuhp.Transport,
 ) (*ssepub.SSEServer, error) {
 	if manager, isManager := transport.(*managers.Manager); isManager {
-		return ssepub.ManagedSSEServer(ctx, logger, manager, nil), nil
+		return ssepub.ManagedSSEServer(ctx, logger, manager, nil, codec), nil
 	}
 	return nil, nerror.New("transport type is not a *managers.Manager implementing type")
 }
@@ -362,11 +387,13 @@ type Station struct {
 	CreateWorkerHub  WorkerHubCreator
 	CreateRouter     RouterCreator
 	CreateServer     HttpServerCreator
+	CreateTranslator TranslatorCreator
 	CreateSSEServer  SSEServerCreator
 	CreateWebsocket  GorillaHubCreator
 
 	httpHealth     serverpub.HealthPinger
 	transposer     sabuhp.Transposer
+	translator     sabuhp.Translator
 	errGroup       *errgroup.Group
 	httpServer     *serverpub.Server
 	workers        *slaves.ActionHub
@@ -417,6 +444,7 @@ func DefaultStation(
 	station.CreateSSEServer = DefaultSSEServer
 	station.CreateWebsocket = DefaultGorillaHub
 	station.CreateTransposer = DefaultTransposer
+	station.CreateTranslator = DefaultTranslator
 	return station
 }
 
@@ -439,6 +467,7 @@ func DefaultLocalTransportStation(
 	station.CreateSSEServer = DefaultSSEServer
 	station.CreateWebsocket = DefaultGorillaHub
 	station.CreateTransposer = DefaultTransposer
+	station.CreateTranslator = DefaultTranslator
 	return station
 }
 
@@ -482,8 +511,15 @@ func (s *Station) Transport() sabuhp.Transport {
 	return s.transport
 }
 
+func (s *Station) Translator() sabuhp.Translator {
+	if s.translator == nil {
+		panic("Station.Init is not yet called")
+	}
+	return s.translator
+}
+
 func (s *Station) Transposer() sabuhp.Transposer {
-	if s.codec == nil {
+	if s.transposer == nil {
 		panic("Station.Init is not yet called")
 	}
 	return s.transposer
@@ -527,18 +563,23 @@ func (s *Station) Init() error {
 	s.codec = codec
 
 	// create transposer for station
-	var transposer, createTransposerErr = s.CreateTransposer(s.Ctx, s.Logger, codec)
+	var transposer, createTransposerErr = s.CreateTransposer(s.Ctx, s.Logger, codec, DefaultMaxSize)
 	if createTransposerErr != nil {
 		return nerror.WrapOnly(createTransposerErr)
 	}
 	s.transposer = transposer
+
+	var translator, createTranslatorErr = s.CreateTranslator(s.Ctx, s.Logger, codec)
+	if createTranslatorErr != nil {
+		return nerror.WrapOnly(createTranslatorErr)
+	}
+	s.translator = translator
 
 	// create transport
 	var transport, createTransportErr = s.CreateTransport(s.Ctx, s.Logger, s.codec)
 	if createTransportErr != nil {
 		return nerror.WrapOnly(createTransportErr)
 	}
-
 	s.transport = transport
 
 	// check if we were provided a transport manager as transport
@@ -569,11 +610,10 @@ func (s *Station) Init() error {
 	})
 
 	// create resource router
-	var router, createRouterErr = s.CreateRouter(s.Ctx, s.Logger, s.manager, s.transposer)
+	var router, createRouterErr = s.CreateRouter(s.Ctx, s.Logger, s.manager, s.transposer, s.translator)
 	if createRouterErr != nil {
 		return nerror.WrapOnly(createRouterErr)
 	}
-
 	s.router = router
 
 	// create http server
@@ -643,7 +683,7 @@ func (s *Station) Init() error {
 
 	// create websocket server if available
 	if s.CreateWebsocket != nil {
-		var websocketHub, websocketHandler, createWSErr = s.CreateWebsocket(s.Ctx, s.Logger, s.manager)
+		var websocketHub, websocketHandler, createWSErr = s.CreateWebsocket(s.Ctx, s.Logger, s.codec, s.manager)
 		if createWSErr != nil {
 			return nerror.WrapOnly(createWSErr)
 		}
@@ -664,7 +704,7 @@ func (s *Station) Init() error {
 
 	// create sse server if available
 	if s.CreateSSEServer != nil {
-		var sseHub, createSSEErr = s.CreateSSEServer(s.Ctx, s.Logger, s.manager)
+		var sseHub, createSSEErr = s.CreateSSEServer(s.Ctx, s.Logger, s.codec, s.manager)
 		if createSSEErr != nil {
 			return nerror.WrapOnly(createSSEErr)
 		}

@@ -29,4 +29,22 @@ func (j *JsonCodec) Decode(b []byte) (*sabuhp.Message, error) {
 	return &message, nil
 }
 
-var _ sabuhp.Codec = (*MessagePackCodec)(nil)
+var _ sabuhp.WrappedCodec = (*WrappedJsonCodec)(nil)
+
+type WrappedJsonCodec struct{}
+
+func (j *WrappedJsonCodec) Encode(message *sabuhp.WrappedPayload) ([]byte, error) {
+	encoded, encodedErr := json.Marshal(message)
+	if encodedErr != nil {
+		return nil, nerror.WrapOnly(encodedErr)
+	}
+	return encoded, nil
+}
+
+func (j *WrappedJsonCodec) Decode(b []byte) (*sabuhp.WrappedPayload, error) {
+	var message sabuhp.WrappedPayload
+	if jsonErr := json.Unmarshal(b, &message); jsonErr != nil {
+		return nil, nerror.WrapOnly(jsonErr)
+	}
+	return &message, nil
+}

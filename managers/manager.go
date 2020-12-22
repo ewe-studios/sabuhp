@@ -279,7 +279,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 				event.Object("socket_stat", socket.Stat())
 			}))
 
-			if sendErr := socket.Send(msgBytes, gp.config.MaxWaitToSend); sendErr != nil {
+			if sendErr := socket.Send(msgBytes, message.MessageMeta, gp.config.MaxWaitToSend); sendErr != nil {
 				gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 					event.String("hub_id", gp.config.ID.String())
 					event.String("error", sendErr.Error())
@@ -304,7 +304,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 		return
 	}
 
-	if sendErr := socket.Send(okBytes, gp.config.MaxWaitToSend); sendErr != nil {
+	if sendErr := socket.Send(okBytes, okMessage.MessageMeta, gp.config.MaxWaitToSend); sendErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID.String())
 			event.String("error", sendErr.Error())

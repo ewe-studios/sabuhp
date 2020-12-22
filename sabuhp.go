@@ -1,6 +1,7 @@
 package sabuhp
 
 import (
+	"io"
 	"net/http"
 	"time"
 
@@ -127,6 +128,20 @@ type HeaderModifications func(header http.Header)
 // delivered.
 type Transposer interface {
 	Transpose(req *http.Request, params Params) (*Message, error)
+}
+
+// WrappedTransposer transforms a http request into a Message to be
+// delivered.
+type WrappedTransposer interface {
+	Transpose([]byte) (*Message, *WrappedPayload, error)
+}
+
+// Translator transforms a message into an appropriate response
+// to an http response object.
+type Translator interface {
+	Translate(req http.ResponseWriter, message *Message) error
+	TranslateBytes(req http.ResponseWriter, data []byte, message MessageMeta) error
+	TranslateWriter(req http.ResponseWriter, w io.WriterTo, meta MessageMeta) error
 }
 
 // Matcher is the interface that all Matchers should be implemented

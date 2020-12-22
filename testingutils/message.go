@@ -13,6 +13,9 @@ func Msg(topic string, message string, fromAddr string) sabuhp.Message {
 		Topic:    topic,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
+		MessageMeta: sabuhp.MessageMeta{
+			ContentType: sabuhp.MessageContentType,
+		},
 	}
 }
 
@@ -21,6 +24,9 @@ func EncodedMsg(codec sabuhp.Codec, topic string, message string, fromAddr strin
 		Topic:    topic,
 		FromAddr: fromAddr,
 		Payload:  []byte(message),
+		MessageMeta: sabuhp.MessageMeta{
+			ContentType: sabuhp.MessageContentType,
+		},
 	})
 }
 

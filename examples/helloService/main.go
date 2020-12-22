@@ -65,7 +65,7 @@ func main() {
 
 	if stationInitErr := station.Init(); stationInitErr != nil {
 		var wrapErr = nerror.WrapOnly(stationInitErr)
-		log.Fatalf("Closing application due to station initialization: %+q", wrapErr)
+		log.Fatalf("Closing application due to station initialization:\n %+s", wrapErr)
 	}
 
 	// create a http to event route redirect to an event
@@ -83,6 +83,7 @@ func main() {
 
 	if err := station.Wait(); err != nil {
 		var wrapErr = nerror.WrapOnly(err)
-		log.Fatalf("Closing application: %+q", wrapErr)
+		log.Println(wrapErr.Error())
+		log.Fatalf("Closing application")
 	}
 }
