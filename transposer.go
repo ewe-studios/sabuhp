@@ -6,7 +6,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/influx6/npkg/nerror"
@@ -173,52 +172,6 @@ func (r *CodecTranslator) Translate(res http.ResponseWriter, m *Message) error {
 	return nil
 }
 
-type WrappedCodecTransposer struct {
-	WrappedCodec WrappedCodec
-	Codec        Codec
-	Logger       Logger
-}
-
-func NewWrappedCodecTransposer(codec Codec, wrappedCodec WrappedCodec, logger Logger) *WrappedCodecTransposer {
-	return &WrappedCodecTransposer{Codec: codec, WrappedCodec: wrappedCodec, Logger: logger}
-}
-
-func (r *WrappedCodecTransposer) Transpose(data []byte) (*Message, *WrappedPayload, error) {
-	// decode data into wrapped object
-	var wrappedPayload, wrappedPayloadErr = r.WrappedCodec.Decode(data)
-	if wrappedPayloadErr != nil {
-		return nil, nil, nerror.WrapOnly(wrappedPayloadErr)
-	}
-
-	// check if it's a payload content type
-	if wrappedPayload.ContentType != MessageContentType {
-		return &Message{
-			Topic:    "",
-			ID:       nxid.New(),
-			Delivery: SendToAll,
-			MessageMeta: MessageMeta{
-				ContentType:     wrappedPayload.ContentType,
-				Query:           url.Values{},
-				Form:            url.Values{},
-				Headers:         Header{},
-				Cookies:         nil,
-				MultipartReader: nil,
-			},
-			Payload:             wrappedPayload.Payload,
-			Metadata:            map[string]string{},
-			Params:              map[string]string{},
-			LocalPayload:        nil,
-			OverridingTransport: nil,
-		}, wrappedPayload, nil
-	}
-
-	var message, messageErr = r.Codec.Decode(wrappedPayload.Payload)
-	if messageErr != nil {
-		return nil, wrappedPayload, nerror.WrapOnly(messageErr)
-	}
-	return message, wrappedPayload, nil
-}
-
 var _ Transposer = (*CodecTransposer)(nil)
 
 type CodecTransposer struct {
@@ -261,11 +214,12 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 	if isFormOrMultiPart {
 		return &Message{
 			ID:       nxid.New(),
-			Topic:    "",
+			Topic:    req.URL.Path,
 			FromAddr: req.RemoteAddr,
 			Delivery: SendToAll,
 			Payload:  nil,
 			MessageMeta: MessageMeta{
+				Path:            req.URL.Path,
 				Headers:         Header(req.Header.Clone()),
 				Cookies:         ReadCookies(Header(req.Header), ""),
 				Query:           req.URL.Query(),
@@ -289,14 +243,15 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 	// assume the body is the message payload.
 	if !strings.Contains(contentTypeLower, MessageContentType) {
 		return &Message{
-			Topic:    "",
 			ID:       nxid.New(),
+			Topic:    req.URL.Path,
 			FromAddr: req.RemoteAddr,
 			Delivery: SendToAll,
 			MessageMeta: MessageMeta{
 				MultipartReader: nil,
 				Headers:         Header(req.Header.Clone()),
 				Cookies:         ReadCookies(Header(req.Header), ""),
+				Path:            req.URL.Path,
 				Form:            req.Form,
 				Query:           req.URL.Query(),
 				ContentType:     contentType,
@@ -319,6 +274,10 @@ func (r *CodecTransposer) Transpose(req *http.Request, params Params) (*Message,
 
 	if len(message.ContentType) == 0 {
 		message.ContentType = contentType
+	}
+
+	if len(message.Path) == 0 {
+		message.Path = req.URL.Path
 	}
 
 	for k, v := range params {
