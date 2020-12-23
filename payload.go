@@ -121,12 +121,12 @@ type Message struct {
 	Payload []byte
 
 	// Metadata are related facts attached to a message.
-	Metadata map[string]string
+	Metadata Params
 
 	// Params are related facts attached to a message based on some route or
 	// sender and provide some values to keyed expectation, unlike metadata
 	// it has specific input in the message.
-	Params map[string]string
+	Params Params
 
 	// LocalPayload is the payload attached which can be a
 	// concrete object for which this message is to communicate

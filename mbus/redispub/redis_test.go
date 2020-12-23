@@ -2,52 +2,36 @@ package redispub
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/codecs"
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/influx6/npkg/nerror"
+	redis "github.com/go-redis/redis/v8"
 	"github.com/influx6/sabuhp/testingutils"
 )
 
-var _ sabuhp.Codec = (*jsonCodec)(nil)
-
-type jsonCodec struct{}
-
-func (j *jsonCodec) Encode(message *sabuhp.Message) ([]byte, error) {
-	encoded, encodedErr := json.Marshal(message)
-	if encodedErr != nil {
-		return nil, nerror.WrapOnly(encodedErr)
-	}
-
-	return encoded, nil
-}
-
-func (j *jsonCodec) Decode(b []byte) (*sabuhp.Message, error) {
-	var message sabuhp.Message
-	if jsonErr := json.Unmarshal(b, &message); jsonErr != nil {
-		return nil, nerror.WrapOnly(jsonErr)
-	}
-	return &message, nil
-}
+var codec = &codecs.JsonCodec{}
 
 func TestRedis_Start_Stop_WithCancel(t *testing.T) {
 	var ctx, canceler = context.WithCancel(context.Background())
 
 	var logger = &testingutils.LoggerPub{}
-	var codec = &jsonCodec{}
 	var config PubSubConfig
 	config.Ctx = ctx
 	config.Codec = codec
 	config.Logger = logger
+	config.Redis = redis.Options{
+		Network: "tcp",
+		Addr:    "localhost:7090",
+	}
 
 	var pb, err = NewRedisPubSub(config)
 	require.NoError(t, err)
@@ -68,11 +52,14 @@ func TestRedis_Start_Stop(t *testing.T) {
 	defer canceler()
 
 	var logger = &testingutils.LoggerPub{}
-	var codec = &jsonCodec{}
 	var config PubSubConfig
 	config.Ctx = ctx
 	config.Codec = codec
 	config.Logger = logger
+	config.Redis = redis.Options{
+		Network: "tcp",
+		Addr:    "localhost:7090",
+	}
 
 	var pb, err = NewRedisPubSub(config)
 	require.NoError(t, err)
@@ -93,11 +80,14 @@ func TestRedis_PubSub_SendToAll(t *testing.T) {
 	defer canceler()
 
 	var logger = &testingutils.LoggerPub{}
-	var codec = &jsonCodec{}
 	var config PubSubConfig
 	config.Ctx = ctx
 	config.Codec = codec
 	config.Logger = logger
+	config.Redis = redis.Options{
+		Network: "tcp",
+		Addr:    "localhost:7090",
+	}
 
 	var pb, err = NewRedisPubSub(config)
 	require.NoError(t, err)
@@ -153,11 +143,14 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 	defer canceler()
 
 	var logger = &testingutils.LoggerPub{}
-	var codec = &jsonCodec{}
 	var config PubSubConfig
 	config.Ctx = ctx
 	config.Codec = codec
 	config.Logger = logger
+	config.Redis = redis.Options{
+		Network: "tcp",
+		Addr:    "localhost:7090",
+	}
 
 	var pb, err = NewRedisPubSub(config)
 	require.NoError(t, err)
@@ -165,13 +158,13 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 
 	pb.Start()
 
-	var whyMessage = sabuhp.NewMessage("why", "me", []byte("yes"))
-	var whatMessage = sabuhp.NewMessage("what", "me", []byte("yes"))
+	var whyMessage = sabuhp.NewMessage("why2", "me", []byte("yes"))
+	var whatMessage = sabuhp.NewMessage("what2", "me", []byte("yes"))
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
 
-	var channel = pb.Listen("what",
+	var channel = pb.Listen("what2",
 		sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 			delivered.Done()
 			if err := transport.SendToOne(whyMessage, 0); err != nil {
@@ -186,7 +179,7 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why",
+	var channel2 = pb.Listen("why2",
 		sabuhp.TransportResponseFunc(func(message *sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 			delivered.Done()
 			return nil
