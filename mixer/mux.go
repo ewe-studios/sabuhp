@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/utils"
 )
 
 type Handler interface {
@@ -42,7 +43,7 @@ func NewMux(config MuxConfig) *Mux {
 }
 
 func (m *Mux) Serve(route string, handler Handler) {
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	m.trie.Insert(searchRoute, WithHandler(handler))
 }
 

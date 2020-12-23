@@ -7,6 +7,7 @@ import (
 
 	"github.com/influx6/sabuhp/managers"
 	"github.com/influx6/sabuhp/transport/hsocks"
+	"github.com/influx6/sabuhp/utils"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -72,7 +73,7 @@ func (m *Mux) Routes() []string {
 }
 
 func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
@@ -98,7 +99,7 @@ func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
 // Understand that closing the channel does not close the http endpoint.
 func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp.TransportResponse, methods ...string) {
 	var muxHandler = m.pre.For(handler)
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
@@ -124,7 +125,7 @@ func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp
 // Understand that closing the channel does not close the http endpoint.
 func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, methods ...string) {
 	var muxHandler = m.pre.For(handler)
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
@@ -147,7 +148,7 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 // Understand that closing the channel does not close the http endpoint.
 func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportResponse, methods ...string) sabuhp.Channel {
 	var muxHandler = m.pre.For(handler)
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
@@ -170,7 +171,7 @@ func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportRe
 //
 // Understand that closing the channel does not close the http endpoint.
 func (m *Mux) RedirectAsPath(route string, methods ...string) {
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
@@ -192,7 +193,7 @@ func (m *Mux) RedirectAsPath(route string, methods ...string) {
 //
 // Understand that closing the channel does not close the http endpoint.
 func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
-	var searchRoute = m.rootPath + route
+	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
