@@ -1,4 +1,4 @@
-package peji
+package mixer
 
 import (
 	"strings"
