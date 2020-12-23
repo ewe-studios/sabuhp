@@ -7,12 +7,12 @@ import (
 )
 
 type Handler interface {
-	Handle(message *sabuhp.Message) *sabuhp.Message
+	Handle(message *sabuhp.Message) (*sabuhp.Message, error)
 }
 
-type HandlerFunc func(message *sabuhp.Message) *sabuhp.Message
+type HandlerFunc func(message *sabuhp.Message) (*sabuhp.Message, error)
 
-func (h HandlerFunc) Handle(message *sabuhp.Message) *sabuhp.Message {
+func (h HandlerFunc) Handle(message *sabuhp.Message) (*sabuhp.Message, error) {
 	return h(message)
 }
 
@@ -54,7 +54,7 @@ func (m *Mux) Match(target string) bool {
 	return handler != nil
 }
 
-func (m *Mux) ServeRoute(d *sabuhp.Message) *sabuhp.Message {
+func (m *Mux) ServeRoute(d *sabuhp.Message) (*sabuhp.Message, error) {
 	var reqPath = d.Path
 	if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
 		// Remove trailing slash and client-permanent rule for redirection,
