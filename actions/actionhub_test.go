@@ -1,4 +1,4 @@
-package slaves
+package actions
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/influx6/sabuhp/injectors"
 	"github.com/influx6/sabuhp/testingutils"
 
 	"github.com/influx6/sabuhp"
@@ -46,12 +47,14 @@ func TestNewActionHub_StartStop(t *testing.T) {
 		},
 	}
 
+	var injector = injectors.NewInjector()
 	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
 	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
+		injector,
 		pubsub,
 		logger,
 	)
@@ -102,6 +105,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	var ctx, canceler = context.WithCancel(context.Background())
 
 	var ack = make(chan struct{}, 1)
+	var injector = injectors.NewInjector()
 	var templateRegistry = NewWorkerTemplateRegistry()
 	templateRegistry.Register(WorkerRequest{
 		ActionName:    "say_hello",
@@ -113,6 +117,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		ctx,
 		escalationHandling,
 		templateRegistry,
+		injector,
 		pubb,
 		logger,
 	)
@@ -176,12 +181,14 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 		return &noChannel
 	}
 
+	var injector = injectors.NewInjector()
 	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
 	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
+		injector,
 		pubb,
 		logger,
 	)
@@ -191,7 +198,9 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	var ack = make(chan struct{}, 3)
 	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack), SlaveWorkerRequest{
 		ActionName: "hello_slave",
-		Action: ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, sub sabuhp.Transport) {
+		Action: ActionFunc(func(ctx context.Context, job Job) {
+			var to = job.To
+			var sub = job.Transport
 			if err := sub.SendToAll(&sabuhp.Message{
 				Topic:    "say_hello",
 				FromAddr: to,
@@ -263,12 +272,14 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 		return &noChannel
 	}
 
+	var injector = injectors.NewInjector()
 	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
 	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
+		injector,
 		pubb,
 		logger,
 	)
@@ -305,7 +316,10 @@ func sayHelloAction(ctx context.Context, ack chan struct{}) WorkGroupCreator {
 	return func(config WorkerConfig) *WorkerGroup {
 		config.Instance = ScalingInstances
 		config.Behaviour = RestartAll
-		config.Action = ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, sub sabuhp.Transport) {
+		config.Action = ActionFunc(func(ctx context.Context, job Job) {
+			var to = job.To
+			var message = job.Msg
+			var sub = job.Transport
 			_ = sub.SendToAll(&sabuhp.Message{
 				Topic:    message.FromAddr,
 				FromAddr: to,

@@ -12,8 +12,8 @@ import (
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/actions"
 	"github.com/influx6/sabuhp/ochestrator"
-	"github.com/influx6/sabuhp/slaves"
 	"github.com/influx6/sabuhp/testingutils"
 
 	redis "github.com/go-redis/redis/v8"
@@ -28,15 +28,17 @@ func main() {
 	defer njson.ReleaseLogStack(logStack)
 
 	// worker template registry
-	var workerRegistry = slaves.NewWorkerTemplateRegistry()
-	workerRegistry.Register(slaves.WorkerRequest{
+	var workerRegistry = actions.NewWorkerTemplateRegistry()
+	workerRegistry.Register(actions.WorkerRequest{
 		ActionName:  "hello_world",
 		PubSubTopic: "hello",
-		WorkerCreator: func(config slaves.WorkerConfig) *slaves.WorkerGroup {
-			config.Instance = slaves.ScalingInstances
-			config.Behaviour = slaves.RestartAll
-			config.Action = slaves.ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, t sabuhp.Transport) {
-				if sendErr := t.SendToAll(&sabuhp.Message{
+		WorkerCreator: func(config actions.WorkerConfig) *actions.WorkerGroup {
+			config.Instance = actions.ScalingInstances
+			config.Behaviour = actions.RestartAll
+			config.Action = actions.ActionFunc(func(ctx context.Context, job actions.Job) {
+				var to = job.To
+				var message = job.Msg
+				if sendErr := job.Transport.SendToAll(&sabuhp.Message{
 					ID:       nxid.New(),
 					Topic:    message.FromAddr,
 					FromAddr: to,
@@ -51,7 +53,7 @@ func main() {
 						End()
 				}
 			})
-			return slaves.NewWorkGroup(config)
+			return actions.NewWorkGroup(config)
 		},
 	})
 

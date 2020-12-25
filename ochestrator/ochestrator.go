@@ -17,12 +17,12 @@ import (
 	"github.com/Ewe-Studios/websocket"
 
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/actions"
 	"github.com/influx6/sabuhp/codecs"
 	"github.com/influx6/sabuhp/managers"
 	"github.com/influx6/sabuhp/mbox"
 	"github.com/influx6/sabuhp/mbus/redispub"
 	"github.com/influx6/sabuhp/radar"
-	"github.com/influx6/sabuhp/slaves"
 	"github.com/influx6/sabuhp/transport/gorillapub"
 	"github.com/influx6/sabuhp/transport/httpub/serverpub"
 	"github.com/influx6/sabuhp/transport/ssepub"
@@ -270,17 +270,17 @@ func DefaultManager(
 type WorkerHubCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	registry *slaves.WorkerTemplateRegistry,
+	registry *actions.WorkerTemplateRegistry,
 	transport sabuhp.Transport,
-) (*slaves.ActionHub, error)
+) (*actions.ActionHub, error)
 
 func DefaultWorkerHub(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	registry *slaves.WorkerTemplateRegistry,
+	registry *actions.WorkerTemplateRegistry,
 	transport sabuhp.Transport,
-) (*slaves.ActionHub, error) {
-	return DefaultWorkerHubWithEscalation(ctx, logger, registry, transport, func(escalation slaves.Escalation, hub *slaves.ActionHub) {
+) (*actions.ActionHub, error) {
+	return DefaultWorkerHubWithEscalation(ctx, logger, registry, transport, func(escalation actions.Escalation, hub *actions.ActionHub) {
 		var logStack = njson.Log(logger)
 		defer njson.ReleaseLogStack(logStack)
 
@@ -295,7 +295,7 @@ func DefaultWorkerHub(
 
 		log.Formatted("worker_protocol", "%+v", escalation.WorkerProtocol).
 			Formatted("group_protocol", "%+v", escalation.GroupProtocol).
-			List("stats", slaves.WorkerStats(hub.Stats())).
+			List("stats", actions.WorkerStats(hub.Stats())).
 			Int("pending_messages", len(escalation.PendingMessages)).
 			End()
 	})
@@ -304,13 +304,13 @@ func DefaultWorkerHub(
 func DefaultWorkerHubWithEscalation(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	registry *slaves.WorkerTemplateRegistry,
+	registry *actions.WorkerTemplateRegistry,
 	transport sabuhp.Transport,
-	escalations slaves.EscalationNotification,
-) (*slaves.ActionHub, error) {
+	escalations actions.EscalationNotification,
+) (*actions.ActionHub, error) {
 	// create worker hub
 	if manager, isManager := transport.(*managers.Manager); isManager {
-		return slaves.NewActionHub(
+		return actions.NewActionHub(
 			ctx,
 			escalations,
 			registry,
@@ -387,7 +387,7 @@ type Station struct {
 	Addr           string
 	Logger         sabuhp.Logger
 	Ctx            context.Context
-	WorkerRegistry *slaves.WorkerTemplateRegistry
+	WorkerRegistry *actions.WorkerTemplateRegistry
 
 	// creator functions
 	CreateCodec      CodecCreator
@@ -406,7 +406,7 @@ type Station struct {
 	translator     sabuhp.Translator
 	errGroup       *errgroup.Group
 	httpServer     *serverpub.Server
-	workers        *slaves.ActionHub
+	workers        *actions.ActionHub
 	codec          sabuhp.Codec
 	router         *radar.Mux
 	transport      sabuhp.Transport
@@ -422,7 +422,7 @@ func NewStation(
 	id nxid.ID,
 	addr string,
 	logger sabuhp.Logger,
-	registry *slaves.WorkerTemplateRegistry,
+	registry *actions.WorkerTemplateRegistry,
 ) *Station {
 	var errGroup, groupCtx = errgroup.WithContext(ctx)
 	return &Station{
@@ -441,7 +441,7 @@ func DefaultStation(
 	ctx context.Context,
 	id nxid.ID, addr string,
 	logger sabuhp.Logger,
-	registry *slaves.WorkerTemplateRegistry,
+	registry *actions.WorkerTemplateRegistry,
 ) *Station {
 	var station = NewStation(ctx, id, addr, logger, registry)
 	station.CreateCodec = MessagePackCodec
@@ -464,7 +464,7 @@ func DefaultLocalTransportStation(
 	id nxid.ID,
 	addr string,
 	logger sabuhp.Logger,
-	registry *slaves.WorkerTemplateRegistry,
+	registry *actions.WorkerTemplateRegistry,
 ) *Station {
 	var station = NewStation(ctx, id, addr, logger, registry)
 	station.CreateCodec = MessagePackCodec
@@ -507,7 +507,7 @@ func (s *Station) WebsocketHub() *gorillapub.GorillaHub {
 	return s.gwsHub
 }
 
-func (s *Station) Workers() *slaves.ActionHub {
+func (s *Station) Workers() *actions.ActionHub {
 	if s.workers == nil {
 		panic("Station.Init is not yet called")
 	}

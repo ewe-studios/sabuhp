@@ -1,4 +1,4 @@
-package slaves
+package actions
 
 import (
 	"context"
@@ -9,19 +9,28 @@ import (
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
+
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/injectors"
 
 	"github.com/influx6/npkg/nerror"
 )
 
-type ActionFunc func(ctx context.Context, to string, message *sabuhp.Message, t sabuhp.Transport)
+type Job struct {
+	To        string
+	DI        *injectors.Injector
+	Msg       *sabuhp.Message
+	Transport sabuhp.Transport
+}
 
-func (a ActionFunc) Do(ctx context.Context, to string, message *sabuhp.Message, t sabuhp.Transport) {
-	a(ctx, to, message, t)
+type ActionFunc func(ctx context.Context, job Job)
+
+func (a ActionFunc) Do(ctx context.Context, job Job) {
+	a(ctx, job)
 }
 
 type Action interface {
-	Do(ctx context.Context, to string, message *sabuhp.Message, t sabuhp.Transport)
+	Do(ctx context.Context, j Job)
 }
 
 // WorkGroupCreator exposes a method which takes a WorkerConfig
@@ -173,6 +182,7 @@ type EscalationNotification func(escalation Escalation, hub *ActionHub)
 type ActionHub struct {
 	Pubsub         sabuhp.Transport
 	Logger         sabuhp.Logger
+	Injector       *injectors.Injector
 	WorkRegistry   *WorkerTemplateRegistry
 	Context        context.Context
 	CancelFn       context.CancelFunc
@@ -198,12 +208,14 @@ func NewActionHub(
 	ctx context.Context,
 	escalationHandler EscalationNotification,
 	templates *WorkerTemplateRegistry,
+	injector *injectors.Injector,
 	pubsub sabuhp.Transport,
 	logger sabuhp.Logger,
 ) *ActionHub {
 	var cntx, cancelFn = context.WithCancel(ctx)
 	return &ActionHub{
 		Context:        cntx,
+		Injector:       injector,
 		Logger:         logger,
 		CancelFn:       cancelFn,
 		Pubsub:         pubsub,
@@ -442,6 +454,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	var workerConfig = WorkerConfig{
 		ActionName:             slaveName,
 		Addr:                   slaveName,
+		Injector:               ah.Injector,
 		MessageBufferSize:      req.MessageBufferSize,
 		Action:                 req.Action,
 		MinWorker:              req.MinWorker,
@@ -485,6 +498,7 @@ func (ah *ActionHub) createMasterGroup(req WorkerRequest) *MasterWorkerGroup {
 		ActionName:             req.ActionName,
 		Context:                ah.Context,
 		Addr:                   req.PubSubTopic,
+		Injector:               ah.Injector,
 		EscalationNotification: ah.handleEscalation(masterGroup),
 	}
 
@@ -662,7 +676,7 @@ func (ah *ActionHub) isAutoChannel(channelTopic string) bool {
 func (ah *ActionHub) endActionWorkers() {
 	var channels map[string]sabuhp.Channel
 	var masterGroups map[string]*MasterWorkerGroup
-	//var workers map[string]*WorkerGroup
+	// var workers map[string]*WorkerGroup
 
 	// swap channel maps
 	ah.workerChannelMutex.Lock()

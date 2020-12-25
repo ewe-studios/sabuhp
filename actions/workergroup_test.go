@@ -1,4 +1,4 @@
-package slaves
+package actions
 
 import (
 	"context"
@@ -36,11 +36,11 @@ func TestNewWorkGroup(t *testing.T) {
 	count.Add(10)
 	var config = createWorkerConfig(
 		context.Background(),
-		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, job Job) {
 			require.NotNil(t, ctx)
-			require.NotNil(t, message)
-			require.NotNil(t, pubsub)
-			require.NotNil(t, testName, to)
+			require.NotNil(t, job.Msg)
+			require.NotNil(t, job.Transport)
+			require.NotNil(t, testName, job.To)
 			count.Done()
 		}),
 		3,
@@ -75,11 +75,11 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var config = createWorkerConfig(
 		context.Background(),
-		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, job Job) {
 			require.NotNil(t, ctx)
-			require.NotNil(t, message)
-			require.NotNil(t, pubsub)
-			require.NotNil(t, testName, to)
+			require.NotNil(t, job.Msg)
+			require.NotNil(t, job.Transport)
+			require.NotNil(t, testName, job.To)
 
 			// create 1 second delay.
 			<-time.After(500 * time.Millisecond)
@@ -124,7 +124,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, job Job) {
 			panic("Killed to restart")
 		}),
 		1,
@@ -175,7 +175,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	var config = createWorkerConfig(
 		context.Background(),
-		ActionFunc(func(ctx context.Context, to string, message *sabuhp.Message, pubsub sabuhp.Transport) {
+		ActionFunc(func(ctx context.Context, job Job) {
 			panic("Killed to restart")
 		}),
 		1,

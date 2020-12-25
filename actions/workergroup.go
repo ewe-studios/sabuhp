@@ -1,4 +1,4 @@
-package slaves
+package actions
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/influx6/npkg"
 
 	"github.com/influx6/sabuhp"
+	"github.com/influx6/sabuhp/injectors"
 
 	"github.com/influx6/npkg/nerror"
 )
@@ -92,6 +93,7 @@ type WorkerConfig struct {
 	Action                 Action
 	MinWorker              int
 	MaxWorkers             int
+	Injector               *injectors.Injector
 	Behaviour              BehaviourType
 	Instance               InstanceType
 	Context                context.Context
@@ -420,7 +422,12 @@ func (w *WorkerGroup) doWork() {
 			return
 		case currentMessage = <-w.jobs:
 			atomic.AddInt64(&w.totalMessages, 1)
-			action.Do(w.context, w.config.Addr, currentMessage.Message, currentMessage.Transport)
+			action.Do(w.context, Job{
+				To:        w.config.Addr,
+				DI:        w.config.Injector,
+				Msg:       currentMessage.Message,
+				Transport: currentMessage.Transport,
+			})
 			atomic.AddInt64(&w.totalProcessed, 1)
 
 			if w.config.Instance == OneTimeInstance {
