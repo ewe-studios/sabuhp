@@ -19,6 +19,7 @@ import (
 	"github.com/influx6/sabuhp"
 	"github.com/influx6/sabuhp/actions"
 	"github.com/influx6/sabuhp/codecs"
+	"github.com/influx6/sabuhp/injectors"
 	"github.com/influx6/sabuhp/managers"
 	"github.com/influx6/sabuhp/mbox"
 	"github.com/influx6/sabuhp/mbus/redispub"
@@ -270,17 +271,28 @@ func DefaultManager(
 type WorkerHubCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	injector *injectors.Injector,
 	registry *actions.WorkerTemplateRegistry,
 	transport sabuhp.Transport,
 ) (*actions.ActionHub, error)
 
+type InjectorCreator func(
+	ctx context.Context,
+	logger sabuhp.Logger,
+) *injectors.Injector
+
+func DefaultInjector(_ context.Context, _ sabuhp.Logger) *injectors.Injector {
+	return injectors.NewInjector()
+}
+
 func DefaultWorkerHub(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	injector *injectors.Injector,
 	registry *actions.WorkerTemplateRegistry,
 	transport sabuhp.Transport,
 ) (*actions.ActionHub, error) {
-	return DefaultWorkerHubWithEscalation(ctx, logger, registry, transport, func(escalation actions.Escalation, hub *actions.ActionHub) {
+	return DefaultWorkerHubWithEscalation(ctx, logger, injector, registry, transport, func(escalation actions.Escalation, hub *actions.ActionHub) {
 		var logStack = njson.Log(logger)
 		defer njson.ReleaseLogStack(logStack)
 
@@ -304,6 +316,7 @@ func DefaultWorkerHub(
 func DefaultWorkerHubWithEscalation(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	injector *injectors.Injector,
 	registry *actions.WorkerTemplateRegistry,
 	transport sabuhp.Transport,
 	escalations actions.EscalationNotification,
@@ -314,6 +327,7 @@ func DefaultWorkerHubWithEscalation(
 			ctx,
 			escalations,
 			registry,
+			injector,
 			manager,
 			logger,
 		), nil
@@ -391,6 +405,7 @@ type Station struct {
 
 	// creator functions
 	CreateCodec      CodecCreator
+	CreateInjector   InjectorCreator
 	CreateTransposer TransposerCreator
 	CreateTransport  TransportCreator
 	CreateManager    ManagerCreator
@@ -401,6 +416,7 @@ type Station struct {
 	CreateSSEServer  SSEServerCreator
 	CreateWebsocket  GorillaHubCreator
 
+	injector       *injectors.Injector
 	httpHealth     serverpub.HealthPinger
 	transposer     sabuhp.Transposer
 	translator     sabuhp.Translator
@@ -445,6 +461,7 @@ func DefaultStation(
 ) *Station {
 	var station = NewStation(ctx, id, addr, logger, registry)
 	station.CreateCodec = MessagePackCodec
+	station.CreateInjector = DefaultInjector
 	station.CreateSSEServer = DefaultSSEServer
 	station.CreateTransport = DefaultRedisTransport
 	station.CreateManager = DefaultManager
@@ -468,6 +485,7 @@ func DefaultLocalTransportStation(
 ) *Station {
 	var station = NewStation(ctx, id, addr, logger, registry)
 	station.CreateCodec = MessagePackCodec
+	station.CreateInjector = DefaultInjector
 	station.CreateSSEServer = DefaultSSEServer
 	station.CreateTransport = DefaultLocalMailerTransport
 	station.CreateManager = DefaultManager
@@ -493,6 +511,10 @@ func (s *Station) HttpServer() *serverpub.Server {
 		panic("Station.Init is not yet called")
 	}
 	return s.httpServer
+}
+
+func (s *Station) Injector() *injectors.Injector {
+	return s.injector
 }
 
 func (s *Station) SSEServer() *ssepub.SSEServer {
@@ -571,6 +593,9 @@ func (s *Station) Init() error {
 		return nerror.WrapOnly(createCodecErr)
 	}
 	s.codec = codec
+
+	// create injector for station
+	s.injector = s.CreateInjector(s.Ctx, s.Logger)
 
 	// create transposer for station
 	var transposer, createTransposerErr = s.CreateTransposer(s.Ctx, s.Logger, codec, DefaultMaxSize)
@@ -678,7 +703,7 @@ func (s *Station) Init() error {
 	}), "GET", "HEAD")
 
 	// create worker hub
-	var workerHub, createWorkerHubErr = s.CreateWorkerHub(s.Ctx, s.Logger, s.WorkerRegistry, s.manager)
+	var workerHub, createWorkerHubErr = s.CreateWorkerHub(s.Ctx, s.Logger, s.injector, s.WorkerRegistry, s.manager)
 	if createWorkerHubErr != nil {
 		return nerror.WrapOnly(createWorkerHubErr)
 	}

@@ -106,6 +106,9 @@ func (wc *WorkerConfig) ensure() {
 	if wc.ActionName == "" {
 		panic("WorkerConfig.ActionName must be provided")
 	}
+	if wc.Injector == nil {
+		panic("WorkerConfig.Injector must be provided")
+	}
 	if wc.Addr == "" {
 		panic("WorkerConfig.Addr must be provided")
 	}

@@ -199,6 +199,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	require.NoError(t, hub.Do("say_hello", sayHelloAction(ctx, ack), SlaveWorkerRequest{
 		ActionName: "hello_slave",
 		Action: ActionFunc(func(ctx context.Context, job Job) {
+			require.NotNil(t, job.DI)
 			var to = job.To
 			var sub = job.Transport
 			if err := sub.SendToAll(&sabuhp.Message{

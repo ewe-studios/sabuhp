@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/influx6/sabuhp/injectors"
 	"github.com/influx6/sabuhp/testingutils"
 
 	"github.com/influx6/sabuhp"
@@ -15,6 +16,7 @@ import (
 
 var testName = "test_action"
 var transport = &testingutils.NoPubSub{}
+var injector = injectors.NewInjector()
 
 func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) WorkerConfig { //nolint:lll
 	return WorkerConfig{
@@ -24,6 +26,7 @@ func createWorkerConfig(ctx context.Context, action Action, buffer int, max int)
 		ActionName:          testName,
 		Action:              action,
 		MaxWorkers:          max,
+		Injector:            injector,
 		MessageDeliveryWait: time.Millisecond * 100,
 		EscalationNotification: func(escalation *Escalation, wk *WorkerGroup) {
 
@@ -38,6 +41,7 @@ func TestNewWorkGroup(t *testing.T) {
 		context.Background(),
 		ActionFunc(func(ctx context.Context, job Job) {
 			require.NotNil(t, ctx)
+			require.NotNil(t, job.DI)
 			require.NotNil(t, job.Msg)
 			require.NotNil(t, job.Transport)
 			require.NotNil(t, testName, job.To)
@@ -77,6 +81,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 		context.Background(),
 		ActionFunc(func(ctx context.Context, job Job) {
 			require.NotNil(t, ctx)
+			require.NotNil(t, job.DI)
 			require.NotNil(t, job.Msg)
 			require.NotNil(t, job.Transport)
 			require.NotNil(t, testName, job.To)
