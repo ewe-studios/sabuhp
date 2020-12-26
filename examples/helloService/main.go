@@ -62,7 +62,7 @@ func main() {
 	ndaemon.WaiterForKillWithSignal(ndaemon.WaitForKillChan(), masterEnder)
 
 	var workerId = nxid.New()
-	var station = ochestrator.DefaultStation(masterCtx, workerId, ":7800", mainLogger, workerRegistry)
+	var station = ochestrator.DefaultStation(masterCtx, workerId.String(), ":7800", mainLogger, workerRegistry)
 	station.CreateTransport = ochestrator.RedisTransportWithOptions(redis.Options{
 		Network: "tcp",
 		Addr:    "localhost:7090",

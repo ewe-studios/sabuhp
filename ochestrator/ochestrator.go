@@ -10,7 +10,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -219,7 +218,7 @@ func DefaultRouterWithNotFound(
 
 type ManagerCreator func(
 	ctx context.Context,
-	id nxid.ID,
+	id string,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
 	transport sabuhp.Transport,
@@ -227,7 +226,7 @@ type ManagerCreator func(
 
 func DefaultManager(
 	ctx context.Context,
-	id nxid.ID,
+	id string,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
 	transport sabuhp.Transport,
@@ -390,7 +389,7 @@ func DefaultSSEServer(
 }
 
 type Station struct {
-	Id nxid.ID
+	Id string
 
 	// Register will indicate if handler for websocket and sse server if
 	// created will be automatically added into the /streams/sse and /streams/ws
@@ -435,7 +434,7 @@ type Station struct {
 // NewStation returns a new instance of a station.
 func NewStation(
 	ctx context.Context,
-	id nxid.ID,
+	id string,
 	addr string,
 	logger sabuhp.Logger,
 	registry *actions.WorkerTemplateRegistry,
@@ -455,7 +454,8 @@ func NewStation(
 // DefaultStation returns a station using a redis backed transport layer and MessagePack codec.
 func DefaultStation(
 	ctx context.Context,
-	id nxid.ID, addr string,
+	id string,
+	addr string,
 	logger sabuhp.Logger,
 	registry *actions.WorkerTemplateRegistry,
 ) *Station {
@@ -478,7 +478,7 @@ func DefaultStation(
 // DefaultStation returns a station using a LocalMailer backed transport layer and MessagePack codec.
 func DefaultLocalTransportStation(
 	ctx context.Context,
-	id nxid.ID,
+	id string,
 	addr string,
 	logger sabuhp.Logger,
 	registry *actions.WorkerTemplateRegistry,
