@@ -1,6 +1,7 @@
 package injectors
 
 import (
+	"reflect"
 	"sync"
 
 	"github.com/influx6/npkg/nerror"
@@ -39,6 +40,41 @@ func (i *Injector) ResolveType(targetType interface{}, args interface{}) (interf
 		return nil, nerror.New("type is not registered")
 	}
 	return typeCreator(i, args)
+}
+
+// AddTypeValue works similar to Injector.AddValue and adds giving type
+// which is used to generate a new type with the provided item supplied
+// as the value of that type.
+//
+// When you use a instance of that type, then the address of that instance
+// is copied over and returned to you.
+func (i *Injector) AddTypeValue(targetType interface{}, alias string) error {
+	if targetType == nil {
+		return nerror.New("Can't you nil as type")
+	}
+
+	var typeName = nreflect.NameOf(targetType)
+	var alreadyExisted = i.has(typeName)
+	if alreadyExisted {
+		return nerror.New("%q type already has a creator", typeName)
+	}
+
+	var typeOfTarget = reflect.TypeOf(targetType)
+	var creator = func(_ *Injector, _ interface{}) (interface{}, error) {
+		v := reflect.New(typeOfTarget).Elem()
+		result := v
+		for v.Kind() == reflect.Ptr {
+			v.Set(reflect.New(v.Type().Elem()))
+			v = v.Elem()
+		}
+		return result.Interface(), nil
+	}
+
+	i.storeUp(typeName, creator)
+	if len(alias) != 0 {
+		i.storeUp(alias, creator)
+	}
+	return nil
 }
 
 // AddCreator adds a creator for a giving reflect type which will

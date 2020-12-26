@@ -279,10 +279,10 @@ type WorkerHubCreator func(
 type InjectorCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
-) *injectors.Injector
+) (*injectors.Injector, error)
 
-func DefaultInjector(_ context.Context, _ sabuhp.Logger) *injectors.Injector {
-	return injectors.NewInjector()
+func DefaultInjector(_ context.Context, _ sabuhp.Logger) (*injectors.Injector, error) {
+	return injectors.NewInjector(), nil
 }
 
 func DefaultWorkerHub(
@@ -595,7 +595,11 @@ func (s *Station) Init() error {
 	s.codec = codec
 
 	// create injector for station
-	s.injector = s.CreateInjector(s.Ctx, s.Logger)
+	var injectorErr error
+	s.injector, injectorErr = s.CreateInjector(s.Ctx, s.Logger)
+	if injectorErr != nil {
+		return nerror.WrapOnly(injectorErr)
+	}
 
 	// create transposer for station
 	var transposer, createTransposerErr = s.CreateTransposer(s.Ctx, s.Logger, codec, DefaultMaxSize)
