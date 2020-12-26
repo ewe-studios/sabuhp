@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/influx6/npkg/nenv"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/influx6/npkg/njson"
@@ -40,6 +41,20 @@ var (
 		EnableCompression: true,
 	}
 )
+
+type EnvConfigCreator func(ctx context.Context, logger sabuhp.Logger) (*nenv.EnvStore, error)
+
+func DefaultEnvConfigCreator(prefix string) EnvConfigCreator {
+	return func(ctx context.Context, logger sabuhp.Logger) (*nenv.EnvStore, error) {
+		var envConfig = nenv.New(prefix)
+		var environmentLoader nenv.EnvironmentLoader
+		var loadErr = environmentLoader.Register(envConfig)
+		if loadErr != nil {
+			return nil, nerror.WrapOnly(loadErr)
+		}
+		return envConfig, nil
+	}
+}
 
 type CodecCreator func(
 	ctx context.Context,
@@ -278,9 +293,10 @@ type WorkerHubCreator func(
 type InjectorCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
+	envConfig *nenv.EnvStore,
 ) (*injectors.Injector, error)
 
-func DefaultInjector(_ context.Context, _ sabuhp.Logger) (*injectors.Injector, error) {
+func DefaultInjector(_ context.Context, _ sabuhp.Logger, _ *nenv.EnvStore) (*injectors.Injector, error) {
 	return injectors.NewInjector(), nil
 }
 
@@ -403,6 +419,7 @@ type Station struct {
 	WorkerRegistry *actions.WorkerTemplateRegistry
 
 	// creator functions
+	CreateEnvConfig  EnvConfigCreator
 	CreateCodec      CodecCreator
 	CreateInjector   InjectorCreator
 	CreateTransposer TransposerCreator
@@ -415,6 +432,7 @@ type Station struct {
 	CreateSSEServer  SSEServerCreator
 	CreateWebsocket  GorillaHubCreator
 
+	envConfig      *nenv.EnvStore
 	injector       *injectors.Injector
 	httpHealth     serverpub.HealthPinger
 	transposer     sabuhp.Transposer
@@ -460,6 +478,7 @@ func DefaultStation(
 	registry *actions.WorkerTemplateRegistry,
 ) *Station {
 	var station = NewStation(ctx, id, addr, logger, registry)
+	station.CreateEnvConfig = DefaultEnvConfigCreator("")
 	station.CreateCodec = MessagePackCodec
 	station.CreateInjector = DefaultInjector
 	station.CreateSSEServer = DefaultSSEServer
@@ -484,6 +503,7 @@ func DefaultLocalTransportStation(
 	registry *actions.WorkerTemplateRegistry,
 ) *Station {
 	var station = NewStation(ctx, id, addr, logger, registry)
+	station.CreateEnvConfig = DefaultEnvConfigCreator("")
 	station.CreateCodec = MessagePackCodec
 	station.CreateInjector = DefaultInjector
 	station.CreateSSEServer = DefaultSSEServer
@@ -511,6 +531,10 @@ func (s *Station) HttpServer() *serverpub.Server {
 		panic("Station.Init is not yet called")
 	}
 	return s.httpServer
+}
+
+func (s *Station) EnvConfig() *nenv.EnvStore {
+	return s.envConfig
 }
 
 func (s *Station) Injector() *injectors.Injector {
@@ -596,7 +620,7 @@ func (s *Station) Init() error {
 
 	// create injector for station
 	var injectorErr error
-	s.injector, injectorErr = s.CreateInjector(s.Ctx, s.Logger)
+	s.injector, injectorErr = s.CreateInjector(s.Ctx, s.Logger, s.envConfig)
 	if injectorErr != nil {
 		return nerror.WrapOnly(injectorErr)
 	}
