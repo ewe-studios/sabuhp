@@ -4,4 +4,4 @@ services:
   redis:
     image: redis:latest
     ports:
-    - 7090:6379
+    - 6379:6379

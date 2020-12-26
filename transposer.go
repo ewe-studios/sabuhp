@@ -45,6 +45,13 @@ func (r *CodecTranslator) TranslateWriter(res http.ResponseWriter, w io.WriterTo
 		res.Header().Set("Content-Type", MessageContentType)
 	}
 
+	stack.New().
+		LInfo().
+		Message("written content type").
+		String("content-type", m.ContentType).
+		String("path", m.Path).
+		End()
+
 	if m.SuggestedStatusCode > 0 {
 		res.WriteHeader(m.SuggestedStatusCode)
 	} else {
@@ -61,6 +68,13 @@ func (r *CodecTranslator) TranslateWriter(res http.ResponseWriter, w io.WriterTo
 			End()
 		return wrappedErr
 	}
+
+	stack.New().
+		LInfo().
+		Message("written content type").
+		String("content-type", m.ContentType).
+		String("path", m.Path).
+		End()
 
 	return nil
 }
