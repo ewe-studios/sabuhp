@@ -240,6 +240,7 @@ func (ps *LocalMailbox) deliverTo(responseHandler sabuhp.TransportResponse, mess
 			ps.logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("message", "failed to Deliver to client")
 				event.String("pubsub_topic", ps.topic)
+				event.Int("_level", int(npkg.ERROR))
 				event.String("panic_error", fmt.Sprintf("%s", err))
 				event.String("panic_error_object", fmt.Sprintf("%#v", err))
 			}))
@@ -250,6 +251,7 @@ func (ps *LocalMailbox) deliverTo(responseHandler sabuhp.TransportResponse, mess
 		ps.logger.Log(njson.JSONB(func(event npkg.Encoder) {
 			event.String("message", "failed to handle delivery to client")
 			event.String("pubsub_topic", ps.topic)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("error", nerror.WrapOnly(err).Error())
 		}))
 	}

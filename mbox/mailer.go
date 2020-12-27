@@ -250,6 +250,7 @@ func (ps *Mailbox) listen() {
 			if deliveryErr := ps.Deliver(data); deliveryErr != nil {
 				ps.logger.Log(njson.MJSON("failed to Deliver decoded message to mailbox", func(event npkg.Encoder) {
 					event.String("data", data.String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("topic", ps.topic)
 					event.String("error", nerror.WrapOnly(deliveryErr).Error())
 				}))
@@ -272,6 +273,7 @@ func (ps *Mailbox) deliverTo(responseHandler sabuhp.TransportResponse, message *
 				event.String("message", "failed to Deliver to client")
 				event.String("pubsub_topic", ps.topic)
 				event.String("panic_error", fmt.Sprintf("%s", err))
+				event.Int("_level", int(npkg.PANIC))
 				event.String("panic_error_object", fmt.Sprintf("%#v", err))
 			}))
 		}
@@ -280,6 +282,7 @@ func (ps *Mailbox) deliverTo(responseHandler sabuhp.TransportResponse, message *
 	if err := responseHandler.Handle(message, ps.transport); err != nil {
 		ps.logger.Log(njson.JSONB(func(event npkg.Encoder) {
 			event.String("message", "failed to handle delivery to client")
+			event.Int("_level", int(npkg.ERROR))
 			event.String("pubsub_topic", ps.topic)
 			event.String("error", nerror.WrapOnly(err).Error())
 		}))

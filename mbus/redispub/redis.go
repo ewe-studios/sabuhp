@@ -220,6 +220,7 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 
 		r.logger.Log(njson.MJSON("Creating stream group for topic", func(encoder npkg.Encoder) {
 			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
 			encoder.String("stream_name", streamName)
 			encoder.String("stream_group_name", streamGroupName)
 		}))
@@ -242,6 +243,7 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 
 		r.logger.Log(njson.MJSON("Checking for pubsub registered event", func(encoder npkg.Encoder) {
 			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
 			encoder.String("stream_name", streamName)
 			encoder.String("stream_group_name", streamGroupName)
 		}))
@@ -254,6 +256,7 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 
 		r.logger.Log(njson.MJSON("Received pubsub first message", func(encoder npkg.Encoder) {
 			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
 			encoder.String("stream_name", streamName)
 			encoder.String("stream_group_name", streamGroupName)
 			encoder.String("message", fmt.Sprintf("%#v", firstMessage))
@@ -267,6 +270,7 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 
 			r.logger.Log(njson.MJSON("Received pubsub error", func(encoder npkg.Encoder) {
 				encoder.String("topic", topic)
+				encoder.Int("_level", int(npkg.INFO))
 				encoder.String("error", firstErrMsg.Error())
 				encoder.String("stream_name", streamName)
 				encoder.String("stream_group_name", streamGroupName)
@@ -300,6 +304,7 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 		r.logger.Log(njson.MJSON("Launched pubsub channel and stream readers", func(encoder npkg.Encoder) {
 			encoder.String("topic", topic)
 			encoder.String("stream_name", streamName)
+			encoder.Int("_level", int(npkg.INFO))
 			encoder.String("stream_group_name", streamGroupName)
 		}))
 
@@ -342,6 +347,7 @@ func (r *PubSub) listenForStream(
 
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.PANIC))
 				event.String("panic_data", fmt.Sprintf("%#v", panicInfo))
 				event.String("stream_name", streamName)
 				event.String("stream_group_name", streamGroupName)
@@ -371,6 +377,7 @@ doLoop:
 
 		if streamErr := stream.Err(); streamErr != nil && streamErr != redis.Nil {
 			r.logger.Log(njson.MJSON("stream err occurred", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.String("error", streamErr.Error())
 				event.String("stream_name", streamName)
 				event.String("stream_group_name", streamGroupName)
@@ -388,6 +395,7 @@ doLoop:
 			event.String("id", stream.FullName())
 			event.String("stream_name", streamName)
 			event.String("stream_group_name", streamGroupName)
+			event.Int("_level", int(npkg.INFO))
 		}))
 
 		for _, xstream := range stream.Val() {
@@ -404,6 +412,7 @@ doLoop:
 					if ackErr := ackCmd.Err(); nil != ackErr {
 						r.logger.Log(njson.MJSON("failed to ack messages", func(event npkg.Encoder) {
 							event.String("value", fmt.Sprintf("%#v", stream.Val()))
+							event.Int("_level", int(npkg.ERROR))
 							event.ListFor("ack_ids", func(idList npkg.ListEncoder) {
 								for _, id := range ackIds {
 									idList.AddString(id)
@@ -423,6 +432,7 @@ doLoop:
 						event.String("value", fmt.Sprintf("%#v", stream.Val()))
 						event.String("stream_name", streamName)
 						event.String("response_string", ackCmd.String())
+						event.Int("_level", int(npkg.INFO))
 						event.Int64("response_code", ackCmd.Val())
 						event.String("response_name", ackCmd.Name())
 						event.String("response_full_name", ackCmd.FullName())
@@ -444,6 +454,7 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred processing message", func(event npkg.Encoder) {
 				event.String("topic", topicName)
+				event.Int("_level", int(npkg.PANIC))
 				event.String("message_id", message.ID)
 				event.String("panic_data", fmt.Sprintf("%#v", panicInfo))
 				event.ObjectFor("message_values", func(valueEncoder npkg.ObjectEncoder) {
@@ -460,6 +471,7 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 		r.logger.Log(njson.MJSON("failed to find 'data' key in message key-value map", func(event npkg.Encoder) {
 			event.String("topic", topicName)
 			event.String("message_id", message.ID)
+			event.Int("_level", int(npkg.WARN))
 			event.ObjectFor("message_values", func(valueEncoder npkg.ObjectEncoder) {
 				for key, val := range message.Values {
 					valueEncoder.String(key, fmt.Sprintf("%+v", val))
@@ -471,6 +483,7 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 
 	r.logger.Log(njson.MJSON("received data from xmessage", func(event npkg.Encoder) {
 		event.String("topic", topicName)
+		event.Int("_level", int(npkg.INFO))
 		event.String("message_id", message.ID)
 		event.String("message_data", fmt.Sprintf("%s", messageData))
 		event.String("message_data_type", fmt.Sprintf("%T", messageData))
@@ -486,6 +499,7 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 
 	r.logger.Log(njson.MJSON("decoded message type into bytes", func(event npkg.Encoder) {
 		event.String("topic", topicName)
+		event.Int("_level", int(npkg.INFO))
 		event.String("message_id", message.ID)
 		event.String("message_bytes", fmt.Sprintf("%#v", messageBytes))
 		event.String("message_data_type", fmt.Sprintf("%T", messageBytes))
@@ -495,6 +509,7 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 	if decodedErr != nil {
 		r.logger.Log(njson.MJSON("failed to decode message", func(event npkg.Encoder) {
 			event.String("topic", topicName)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("message_id", message.ID)
 			event.String("error", fmt.Sprintf("%#v", decodedErr))
 			event.ObjectFor("message_values", func(valueEncoder npkg.ObjectEncoder) {
@@ -509,6 +524,7 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", topicName)
 			event.String("message_id", message.ID)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("error", handleErr.Error())
 			event.ObjectFor("message_values", func(valueEncoder npkg.ObjectEncoder) {
 				for key, val := range message.Values {
@@ -532,12 +548,14 @@ func (r *PubSub) listenForChannel(
 
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.PANIC))
 				event.String("panic_data", fmt.Sprintf("%#v", panicInfo))
 			}))
 		}
 
 		if closeErr := pub.pub.Close(); closeErr != nil {
 			r.logger.Log(njson.MJSON("error out during subscription closing", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.String("error", nerror.WrapOnly(closeErr).Error())
 			}))
 		}
@@ -556,6 +574,7 @@ doLoop:
 			}
 		case msg := <-messages:
 			r.logger.Log(njson.MJSON("Received new msg", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.INFO))
 				event.String("topic", pub.topic)
 				event.String("message", fmt.Sprintf("%#v", msg))
 			}))
@@ -570,6 +589,7 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred handling pubsub message", func(event npkg.Encoder) {
 				event.Error("error", panicErr)
+				event.Int("_level", int(npkg.ERROR))
 				event.String("message", message.String())
 				event.String("panic_data", fmt.Sprintf("%#v", panicInfo))
 				event.String("panic_data", fmt.Sprintf("%+s", panicInfo))
@@ -579,6 +599,7 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 
 	r.logger.Log(njson.MJSON("received message to decode", func(event npkg.Encoder) {
 		event.String("topic", message.Channel)
+		event.Int("_level", int(npkg.INFO))
 		event.String("pattern", message.Pattern)
 		event.String("payload", message.Payload)
 	}))
@@ -589,6 +610,7 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 		r.logger.Log(njson.MJSON("failed to decode message", func(event npkg.Encoder) {
 			event.String("topic", message.Channel)
 			event.String("pattern", message.Pattern)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("payload", message.Payload)
 			event.String("error", decodedErr.Error())
 		}))
@@ -598,6 +620,7 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", message.Channel)
 			event.String("pattern", message.Pattern)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("payload", message.Payload)
 			event.String("error", handleErr.Error())
 		}))
@@ -624,6 +647,7 @@ func (r *PubSub) handleSendToOneMessageBatch(batch chan *sabuhp.Message) {
 			r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
 				event.String("topic", msg.Topic)
 				event.String("from_addr", msg.FromAddr)
+				event.Int("_level", int(npkg.ERROR))
 				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
 				event.String("error", addErr.Error())
 			}))
@@ -634,6 +658,7 @@ func (r *PubSub) handleSendToOneMessageBatch(batch chan *sabuhp.Message) {
 	if execErr != nil {
 		r.logger.Log(njson.MJSON("failed to execute pipeline", func(event npkg.Encoder) {
 			event.String("error", execErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 		}))
 		return
 	}
@@ -644,6 +669,7 @@ func (r *PubSub) handleSendToOneMessageBatch(batch chan *sabuhp.Message) {
 			r.logger.Log(njson.MJSON("failed to publish message", func(event npkg.Encoder) {
 				event.String("from_addr", msg.FromAddr)
 				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
+				event.Int("_level", int(npkg.ERROR))
 				event.String("error", execErr.Error())
 			}))
 
@@ -654,6 +680,7 @@ func (r *PubSub) handleSendToOneMessageBatch(batch chan *sabuhp.Message) {
 
 		r.logger.Log(njson.MJSON("published message to pubsub", func(event npkg.Encoder) {
 			event.String("from_addr", msg.FromAddr)
+			event.Int("_level", int(npkg.INFO))
 			event.String("payload", fmt.Sprintf("%#v", msg.Payload))
 		}))
 	}
@@ -670,6 +697,7 @@ func (r *PubSub) handleSendToAllMessageBatch(batch chan *sabuhp.Message) {
 			r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
 				event.String("topic", msg.Topic)
 				event.String("from_addr", msg.FromAddr)
+				event.Int("_level", int(npkg.ERROR))
 				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
 				event.String("error", addErr.Error())
 			}))
@@ -689,6 +717,7 @@ func (r *PubSub) handleSendToAllMessageBatch(batch chan *sabuhp.Message) {
 		if execErr := execResult.Err(); execErr != nil {
 			r.logger.Log(njson.MJSON("failed to publish message", func(event npkg.Encoder) {
 				event.String("from_addr", msg.FromAddr)
+				event.Int("_level", int(npkg.ERROR))
 				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
 				event.String("error", execErr.Error())
 			}))
@@ -700,6 +729,7 @@ func (r *PubSub) handleSendToAllMessageBatch(batch chan *sabuhp.Message) {
 
 		r.logger.Log(njson.MJSON("published message to pubsub", func(event npkg.Encoder) {
 			event.String("from_addr", msg.FromAddr)
+			event.Int("_level", int(npkg.INFO))
 			event.String("payload", fmt.Sprintf("%#v", msg.Payload))
 		}))
 	}
@@ -711,6 +741,7 @@ func (r *PubSub) sendToOne(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 	if encodeErr != nil {
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("topic", data.Topic)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("from_addr", data.FromAddr)
 			event.String("payload", fmt.Sprintf("%#v", data.Payload))
 			event.String("error", encodeErr.Error())
@@ -734,6 +765,7 @@ func (r *PubSub) sendToOne(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("topic", data.Topic)
 			event.String("error", resErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("from_addr", data.FromAddr)
 			event.String("payload", fmt.Sprintf("%#v", data.Payload))
 		}))
@@ -743,6 +775,7 @@ func (r *PubSub) sendToOne(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 	r.logger.Log(njson.MJSON("sent new consumer group message", func(event npkg.Encoder) {
 		event.String("encoded_message", nunsafe.Bytes2String(encodedData))
 		event.String("redis_command_value", responseCmd.Val())
+		event.Int("_level", int(npkg.INFO))
 		event.String("redis_command_name", responseCmd.Name())
 		event.String("redis_command_full_name", responseCmd.FullName())
 	}))
@@ -756,6 +789,7 @@ func (r *PubSub) sendToAll(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("topic", data.Topic)
 			event.String("from_addr", data.FromAddr)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("payload", fmt.Sprintf("%#v", data.Payload))
 			event.String("error", encodeErr.Error())
 		}))
@@ -767,6 +801,7 @@ func (r *PubSub) sendToAll(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("topic", data.Topic)
 			event.String("error", resErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("from_addr", data.FromAddr)
 			event.String("payload", fmt.Sprintf("%#v", data.Payload))
 		}))
@@ -776,6 +811,7 @@ func (r *PubSub) sendToAll(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 	r.logger.Log(njson.MJSON("sent new pubsub message", func(event npkg.Encoder) {
 		event.String("encoded_message", nunsafe.Bytes2String(encodedData))
 		event.Int64("redis_pubsub_id", responseCmd.Val())
+		event.Int("_level", int(npkg.INFO))
 		event.String("redis_command_name", responseCmd.Name())
 		event.String("redis_command_full_name", responseCmd.FullName())
 	}))

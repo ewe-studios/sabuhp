@@ -410,6 +410,7 @@ func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 			if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
 				logger.Log(njson.JSONB(func(event npkg.Encoder) {
 					event.String("error", err.Error())
+					event.Int("_level", int(npkg.ERROR))
 					event.Bool("auto_action", true)
 					event.String("channel_topic", req.PubSubTopic)
 					event.String("channel_action", req.ActionName)
@@ -437,6 +438,7 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 		if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
+				event.Int("_level", int(npkg.ERROR))
 				event.String("channel_topic", req.PubSubTopic)
 				event.String("channel_action", req.ActionName)
 			}))
@@ -476,6 +478,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	var workerChannel = ah.Pubsub.Listen(slaveName, sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
 		if err := slaveWorkerGroup.HandleMessage(data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.String("error", err.Error())
 				event.String("channel_topic", slaveName)
 				event.String("channel_action", req.ActionName)

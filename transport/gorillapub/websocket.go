@@ -88,6 +88,7 @@ func HttpUpgrader(
 		var socket, socketCreateErr = upgrader.Upgrade(writer, request, customHeaders)
 		if socketCreateErr != nil {
 			logger.Log(njson.MJSON("failed to upgrade websocket", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.String("host", request.Host)
 				event.String("method", request.Method)
 				event.String("remote_addr", request.RemoteAddr)
@@ -118,6 +119,7 @@ func HttpUpgrader(
 		var socketHandler = hub.HandleSocket(socket, info)
 		if handleSocketErr := socketHandler.Run(); handleSocketErr != nil {
 			logger.Log(njson.MJSON("error out during socket handling", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.String("host", request.Host)
 				event.String("method", request.Method)
 				event.String("remote_addr", request.RemoteAddr)
@@ -154,6 +156,7 @@ func UpgraderHandler(
 		var socket, socketCreateErr = upgrader.Upgrade(writer, request, customHeaders)
 		if socketCreateErr != nil {
 			logger.Log(njson.MJSON("failed to upgrade websocket", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.Object("params", p)
 				event.String("host", request.Host)
 				event.String("method", request.Method)
@@ -185,6 +188,7 @@ func UpgraderHandler(
 		var socketHandler = hub.HandleSocket(socket, info)
 		if handleSocketErr := socketHandler.Run(); handleSocketErr != nil {
 			logger.Log(njson.MJSON("error out during socket handling", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.Object("params", p)
 				event.String("host", request.Host)
 				event.String("method", request.Method)
@@ -480,6 +484,7 @@ func (s *SocketConfig) clientConnect(ctx context.Context) error {
 			}
 
 			s.Logger.Log(njson.MJSON("failed connection attempt", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.INFO))
 				event.String("error", nerror.WrapOnly(err).Error())
 			}))
 
@@ -491,6 +496,7 @@ func (s *SocketConfig) clientConnect(ctx context.Context) error {
 				_ = res.Body.Close()
 			}
 			s.Logger.Log(njson.MJSON("failed all connection attempts, ending...", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
 				event.String("error", nerror.WrapOnly(err).Error())
 			}))
 			return nerror.WrapOnly(err)
@@ -754,6 +760,7 @@ func (g *GorillaSocket) manage() {
 		if closingErr := g.socket.Close(); closingErr != nil {
 			g.config.Logger.Log(njson.MJSON("error handling during connection closure", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
+				event.Int("_level", int(npkg.ERROR))
 				event.String("socket_id", g.id.String())
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -773,6 +780,7 @@ func (g *GorillaSocket) manage() {
 	g.config.Logger.Log(njson.MJSON("closed all go-routines", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
 		event.String("socket_id", g.id.String())
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 		event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 		event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -789,6 +797,7 @@ loopCall:
 			g.config.Logger.Log(njson.MJSON("closing delivery loop", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
+				event.Int("_level", int(npkg.INFO))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 				event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -802,6 +811,7 @@ loopCall:
 				g.config.Logger.Log(njson.MJSON("error handling message from handler", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
+					event.Int("_level", int(npkg.ERROR))
 					event.Object("message", message)
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -843,6 +853,7 @@ func (g *GorillaSocket) manageReads() {
 			g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
+				event.Int("_level", int(npkg.ERROR))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 				event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -925,6 +936,7 @@ func (g *GorillaSocket) manageReads() {
 				event.Bytes("message", message)
 				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
+				event.Int("_level", int(npkg.ERROR))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 				event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -946,6 +958,7 @@ func (g *GorillaSocket) manageReads() {
 	g.config.Logger.Log(njson.MJSON("closing read loop", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
 		event.String("socket_id", g.id.String())
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 		event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 		event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -985,6 +998,7 @@ func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
 
 	g.config.Logger.Log(njson.MJSON("check ctx before reconnection", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_id", g.id.String())
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 	}))
@@ -1009,6 +1023,7 @@ func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
 	g.config.Logger.Log(njson.MJSON("attempting connection re-establishment", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
 		event.String("socket_id", g.id.String())
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 	}))
 
@@ -1016,6 +1031,7 @@ func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
 	if connErr != nil {
 		g.config.Logger.Log(njson.MJSON("failed connection re-establishment", func(event npkg.Encoder) {
 			event.Bool("is_client", g.isClient)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("socket_id", g.id.String())
 			event.String("socket_network", g.socket.RemoteAddr().Network())
 			event.String("error", nerror.WrapOnly(connErr).Error())
@@ -1033,6 +1049,7 @@ func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
 	g.config.Logger.Log(njson.MJSON("received new connection", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
 		event.String("socket_id", g.id.String())
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 	}))
 
@@ -1048,6 +1065,7 @@ func (g *GorillaSocket) attemptReconnection() (continueLoop bool) {
 
 	g.config.Logger.Log(njson.MJSON("connection re-established", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_id", g.id.String())
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 	}))
@@ -1073,6 +1091,7 @@ runloop:
 			if setTimeErr := g.socket.SetWriteDeadline(time.Now().Add(g.config.WriteMessageWait)); setTimeErr != nil {
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_id", g.id.String())
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -1087,6 +1106,7 @@ runloop:
 				g.config.Logger.Log(njson.MJSON("error write deadline", func(event npkg.Encoder) {
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1110,6 +1130,7 @@ runloop:
 			g.config.Logger.Log(njson.MJSON("received message on pending", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
 				event.String("socket_id", g.id.String())
+				event.Int("_level", int(npkg.INFO))
 				event.String("message", string(message.Data))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -1125,6 +1146,7 @@ runloop:
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
@@ -1141,6 +1163,7 @@ runloop:
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
@@ -1167,6 +1190,7 @@ runloop:
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
 					event.Error("error", wrapped)
@@ -1190,6 +1214,7 @@ runloop:
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
 					event.String("error", nerror.WrapOnly(closingErr).Error())
@@ -1210,6 +1235,7 @@ runloop:
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.Int("_level", int(npkg.INFO))
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
@@ -1220,6 +1246,7 @@ runloop:
 
 			g.config.Logger.Log(njson.MJSON("received write", func(event npkg.Encoder) {
 				event.Bool("is_client", g.isClient)
+				event.Int("_level", int(npkg.INFO))
 				event.String("socket_id", g.id.String())
 				event.String("message", string(message.Data))
 				event.String("socket_network", g.socket.RemoteAddr().Network())
@@ -1235,6 +1262,7 @@ runloop:
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message.Data))
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1251,6 +1279,7 @@ runloop:
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
@@ -1277,6 +1306,7 @@ runloop:
 					event.Bool("is_client", g.isClient)
 					event.String("socket_id", g.id.String())
 					event.String("message", string(message.Data))
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
@@ -1312,6 +1342,7 @@ runloop:
 						event.String("socket_id", g.id.String())
 						event.String("message", string(message.Data))
 						event.String("socket_network", g.socket.RemoteAddr().Network())
+						event.Int("_level", int(npkg.ERROR))
 						event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 						event.String("socket_local_addr", g.socket.LocalAddr().String())
 						event.String("socket_local_network", g.socket.LocalAddr().Network())
@@ -1341,6 +1372,7 @@ runloop:
 					event.String("message", string(message.Data))
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
@@ -1360,6 +1392,7 @@ runloop:
 					event.String("socket_id", g.id.String())
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
@@ -1373,6 +1406,7 @@ runloop:
 					event.String("socket_network", g.socket.RemoteAddr().Network())
 					event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 					event.String("socket_local_addr", g.socket.LocalAddr().String())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_local_network", g.socket.LocalAddr().Network())
 					event.String("socket_sub_protocols", g.socket.Subprotocol())
 					event.String("error", nerror.WrapOnly(writeErr).Error())
@@ -1385,6 +1419,7 @@ runloop:
 
 	g.config.Logger.Log(njson.MJSON("closing write loop", func(event npkg.Encoder) {
 		event.Bool("is_client", g.isClient)
+		event.Int("_level", int(npkg.INFO))
 		event.String("socket_id", g.id.String())
 		event.String("socket_network", g.socket.RemoteAddr().Network())
 		event.String("socket_remote_addr", g.socket.RemoteAddr().String())
@@ -1429,6 +1464,7 @@ func (g *GorillaSocket) messageToWriter(message wsSend, writer io.Writer) error 
 			event.String("message", string(message.Data))
 			event.String("socket_network", g.socket.RemoteAddr().Network())
 			event.String("socket_remote_addr", g.socket.RemoteAddr().String())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("socket_local_addr", g.socket.LocalAddr().String())
 			event.String("socket_local_network", g.socket.LocalAddr().Network())
 			event.String("socket_sub_protocols", g.socket.Subprotocol())
@@ -1448,6 +1484,7 @@ func (g *GorillaSocket) messageToWriter(message wsSend, writer io.Writer) error 
 				event.String("socket_network", g.socket.RemoteAddr().Network())
 				event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 				event.String("socket_local_addr", g.socket.LocalAddr().String())
+				event.Int("_level", int(npkg.ERROR))
 				event.String("socket_local_network", g.socket.LocalAddr().Network())
 				event.String("socket_sub_protocols", g.socket.Subprotocol())
 				event.Error("error", wrapped)
@@ -1466,6 +1503,7 @@ func (g *GorillaSocket) messageToWriter(message wsSend, writer io.Writer) error 
 			event.String("socket_id", g.id.String())
 			event.String("message", string(message.Data))
 			event.String("socket_network", g.socket.RemoteAddr().Network())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("socket_remote_addr", g.socket.RemoteAddr().String())
 			event.String("socket_local_addr", g.socket.LocalAddr().String())
 			event.String("socket_local_network", g.socket.LocalAddr().Network())

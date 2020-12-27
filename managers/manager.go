@@ -128,12 +128,14 @@ func (gp *Manager) SendToOne(data *sabuhp.Message, timeout time.Duration) error 
 		gp.config.Logger.Log(njson.MJSON("failed to send message on transport", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID)
 			event.String("error", sendErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("message", data.String())
 		}))
 	}
 
 	gp.config.Logger.Log(njson.MJSON("sent message", func(event npkg.Encoder) {
 		event.String("hub_id", gp.config.ID)
+		event.Int("_level", int(npkg.INFO))
 		event.String("message", data.String())
 	}))
 	return nil
@@ -144,6 +146,7 @@ func (gp *Manager) SendToAll(data *sabuhp.Message, timeout time.Duration) error 
 	if sendErr := gp.transportManager.SendToAll(data, timeout); sendErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to send message on transport", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("error", sendErr.Error())
 			event.String("message", data.String())
 		}))
@@ -151,6 +154,7 @@ func (gp *Manager) SendToAll(data *sabuhp.Message, timeout time.Duration) error 
 
 	gp.config.Logger.Log(njson.MJSON("sent message", func(event npkg.Encoder) {
 		event.String("hub_id", gp.config.ID)
+		event.Int("_level", int(npkg.INFO))
 		event.String("message", data.String())
 	}))
 	return nil
@@ -176,6 +180,7 @@ func (gp *Manager) HandleSocketBytesMessage(message []byte, socket sabuhp.Socket
 		gp.config.Logger.Log(njson.MJSON("failed to decoded message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID)
 			event.String("error", msgErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("message", string(message))
 			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
@@ -191,6 +196,7 @@ func (gp *Manager) HandleSocketBytesMessageFromOverriding(message []byte, socket
 	if msgErr != nil {
 		gp.config.Logger.Log(njson.MJSON("failed to decoded message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID)
+			event.Int("_level", int(npkg.ERROR))
 			event.String("error", msgErr.Error())
 			event.String("message", string(message))
 			event.String("socket_id", socket.ID().String())
@@ -212,6 +218,7 @@ func (gp *Manager) HandleSocketMessage(msg *sabuhp.Message, socket sabuhp.Socket
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
 			event.String("hub_id", gp.config.ID)
+			event.Int("_level", int(npkg.INFO))
 			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
@@ -222,6 +229,7 @@ func (gp *Manager) HandleSocketMessage(msg *sabuhp.Message, socket sabuhp.Socket
 			event.String("topic", msg.Topic)
 			event.String("subscription_topic", topicString)
 			event.String("message", msg.String())
+			event.Int("_level", int(npkg.INFO))
 			event.String("hub_id", gp.config.ID)
 			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
@@ -234,6 +242,7 @@ func (gp *Manager) HandleSocketMessage(msg *sabuhp.Message, socket sabuhp.Socket
 				gp.config.Logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
 					event.String("hub_id", gp.config.ID)
 					event.String("error", sendErr.Error())
+					event.Int("_level", int(npkg.ERROR))
 					event.String("socket_id", socket.ID().String())
 					event.Object("socket_stat", socket.Stat())
 				}))
@@ -246,6 +255,7 @@ func (gp *Manager) HandleSocketMessage(msg *sabuhp.Message, socket sabuhp.Socket
 			gp.config.Logger.Log(njson.MJSON("failed to send message", func(event npkg.Encoder) {
 				event.String("hub_id", gp.config.ID)
 				event.String("error", sendErr.Error())
+				event.Int("_level", int(npkg.ERROR))
 				event.String("socket_id", socket.ID().String())
 				event.Object("socket_stat", socket.Stat())
 			}))
@@ -264,6 +274,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 			if msgBytesErr != nil {
 				gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 					event.String("hub_id", gp.config.ID)
+					event.Int("_level", int(npkg.ERROR))
 					event.String("error", msgBytesErr.Error())
 					event.String("socket_id", socket.ID().String())
 					event.Object("socket_stat", socket.Stat())
@@ -273,6 +284,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 
 			gp.config.Logger.Log(njson.MJSON("encoded message", func(event npkg.Encoder) {
 				event.String("message", nunsafe.Bytes2String(msgBytes))
+				event.Int("_level", int(npkg.INFO))
 				event.String("hub_id", gp.config.ID)
 				event.String("socket_id", socket.ID().String())
 				event.Object("socket_stat", socket.Stat())
@@ -281,6 +293,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 			if sendErr := socket.Send(msgBytes, message.MessageMeta, gp.config.MaxWaitToSend); sendErr != nil {
 				gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 					event.String("hub_id", gp.config.ID)
+					event.Int("_level", int(npkg.ERROR))
 					event.String("error", sendErr.Error())
 					event.String("socket_id", socket.ID().String())
 					event.Object("socket_stat", socket.Stat())
@@ -297,6 +310,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 		gp.config.Logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID)
 			event.String("error", okBytesErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
@@ -307,6 +321,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 		gp.config.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
 			event.String("hub_id", gp.config.ID)
 			event.String("error", sendErr.Error())
+			event.Int("_level", int(npkg.ERROR))
 			event.String("socket_id", socket.ID().String())
 			event.Object("socket_stat", socket.Stat())
 		}))
@@ -315,6 +330,7 @@ func (gp *Manager) SocketListenToTopic(topic string, socket sabuhp.Socket) {
 
 	gp.config.Logger.Log(njson.MJSON("added socket as subscriber to topic", func(event npkg.Encoder) {
 		event.String("topic", topic)
+		event.Int("_level", int(npkg.INFO))
 		event.String("hub_id", gp.config.ID)
 		event.String("socket_id", socket.ID().String())
 		event.Object("socket_stat", socket.Stat())
