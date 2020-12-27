@@ -30,7 +30,6 @@ func TestRedis_Start_Stop_WithCancel(t *testing.T) {
 	config.Logger = logger
 	config.Redis = redis.Options{
 		Network: "tcp",
-		Addr:    "localhost:7090",
 	}
 
 	var pb, err = NewRedisPubSub(config)
@@ -58,7 +57,6 @@ func TestRedis_Start_Stop(t *testing.T) {
 	config.Logger = logger
 	config.Redis = redis.Options{
 		Network: "tcp",
-		Addr:    "localhost:7090",
 	}
 
 	var pb, err = NewRedisPubSub(config)
@@ -86,7 +84,6 @@ func TestRedis_PubSub_SendToAll(t *testing.T) {
 	config.Logger = logger
 	config.Redis = redis.Options{
 		Network: "tcp",
-		Addr:    "localhost:7090",
 	}
 
 	var pb, err = NewRedisPubSub(config)
@@ -149,7 +146,6 @@ func TestRedis_PubSub_SendToOne(t *testing.T) {
 	config.Logger = logger
 	config.Redis = redis.Options{
 		Network: "tcp",
-		Addr:    "localhost:7090",
 	}
 
 	var pb, err = NewRedisPubSub(config)
