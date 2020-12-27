@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/influx6/npkg/nerror"
+
 	"github.com/influx6/sabuhp/managers"
 	"github.com/influx6/sabuhp/transport/hsocks"
 	"github.com/influx6/sabuhp/utils"
-
-	"github.com/influx6/npkg/nerror"
 
 	"github.com/influx6/sabuhp"
 )
@@ -142,6 +142,14 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 	))
 }
 
+// Event registers handlers for a giving event returning it's channel.
+//
+// Understand that closing the channel does not close the http endpoint.
+func (m *Mux) Event(eventName string, handler sabuhp.TransportResponse) sabuhp.Channel {
+	var muxHandler = m.pre.For(handler)
+	return m.manager.Listen(eventName, muxHandler)
+}
+
 // Service registers handlers for giving event returning
 // events channel.
 //
@@ -218,7 +226,7 @@ func (m *Mux) Match(msg *sabuhp.Message) bool {
 	return handler != nil
 }
 
-func (m *Mux) Handle(msg *sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+func (m *Mux) ServeWithMatchers(msg *sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	for _, h := range m.subRoutes {
 		if h.Match(msg) {
 			return h.Handle(msg, tr)

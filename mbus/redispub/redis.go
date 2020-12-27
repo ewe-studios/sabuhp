@@ -210,7 +210,7 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 			return
 		}
 
-		var pub = r.client.Subscribe(r.ctx, topic)
+		var pub = r.client.PSubscribe(r.ctx, topic)
 		var streamName = fmt.Sprintf("%s_stream", topic)
 		var streamGroupName = fmt.Sprintf("%s_stream_group", topic)
 
