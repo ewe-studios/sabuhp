@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nenv"
 	"golang.org/x/sync/errgroup"
 
@@ -688,6 +689,7 @@ func (s *Station) Init() error {
 	httpServer.ReadyFunc = func() {
 		var logMessage = njson.MJSON("http server is ready")
 		logMessage.String("addr", s.Addr)
+		logMessage.Int("_level", int(npkg.INFO))
 		s.Logger.Log(logMessage)
 	}
 
@@ -725,6 +727,7 @@ func (s *Station) Init() error {
 		if err := json.NewEncoder(writer).Encode(s.router.Routes()); err != nil {
 			var logMessage = njson.MJSON("failed to render response")
 			logMessage.String("addr", s.Addr)
+			logMessage.Int("_level", int(npkg.ERROR))
 			logMessage.Error("error", err)
 			s.Logger.Log(logMessage)
 		}
