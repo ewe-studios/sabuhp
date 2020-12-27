@@ -280,6 +280,9 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 
 	tm.waiter.Add(1)
 	go func() {
+		var logStack = njson.Log(tm.logger)
+		defer njson.ReleaseLogStack(logStack)
+
 		defer tm.waiter.Done()
 
 		// retire topic management
