@@ -26,7 +26,6 @@ func NewCodecTranslator(codec Codec, logger Logger) *CodecTranslator {
 
 func (r *CodecTranslator) TranslateWriter(res http.ResponseWriter, w io.WriterTo, m MessageMeta) error {
 	var stack = njson.Log(r.Logger)
-	defer njson.ReleaseLogStack(stack)
 
 	// if the content type is not MessageContentType ("application/x-event-message")
 	// it means the user does not intend to write the whole message structure as the
@@ -81,7 +80,6 @@ func (r *CodecTranslator) TranslateWriter(res http.ResponseWriter, w io.WriterTo
 
 func (r *CodecTranslator) TranslateBytes(res http.ResponseWriter, data []byte, m MessageMeta) error {
 	var stack = njson.Log(r.Logger)
-	defer njson.ReleaseLogStack(stack)
 
 	// if the content type is not MessageContentType ("application/x-event-message")
 	// it means the user does not intend to write the whole message structure as the
@@ -124,7 +122,6 @@ func (r *CodecTranslator) TranslateBytes(res http.ResponseWriter, data []byte, m
 
 func (r *CodecTranslator) Translate(res http.ResponseWriter, m *Message) error {
 	var stack = njson.Log(r.Logger)
-	defer njson.ReleaseLogStack(stack)
 
 	// if the content type is not MessageContentType ("application/x-event-message")
 	// it means the user does not intend to write the whole message structure as the

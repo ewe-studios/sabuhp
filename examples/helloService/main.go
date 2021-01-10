@@ -25,7 +25,6 @@ var (
 
 func main() {
 	var logStack = njson.Log(mainLogger)
-	defer njson.ReleaseLogStack(logStack)
 
 	// worker template registry
 	var workerRegistry = actions.NewWorkerTemplateRegistry()

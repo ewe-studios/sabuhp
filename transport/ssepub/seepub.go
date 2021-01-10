@@ -84,7 +84,6 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 	var clientId = r.Header.Get(ClientIdentificationHeader)
 
 	var stack = njson.Log(sse.logger)
-	defer njson.ReleaseLogStack(stack)
 
 	stack.New().
 		LInfo().
@@ -558,7 +557,6 @@ func (se *SSESocket) manageReads() {
 	var requestContext = se.req.Context()
 
 	var stack = njson.Log(se.logger)
-	defer njson.ReleaseLogStack(stack)
 
 doLoop:
 	for {
@@ -589,7 +587,6 @@ func (se *SSESocket) manageWrites(flusher http.Flusher) {
 	defer se.waiter.Done()
 
 	var stack = njson.Log(se.logger)
-	defer njson.ReleaseLogStack(stack)
 
 	var requestContext = se.req.Context()
 
@@ -645,7 +642,6 @@ func (se *SSESocket) sendWrite(msg []byte, meta sabuhp.MessageMeta) error {
 	builder.WriteString("\n\n")
 
 	var stack = njson.Log(se.logger)
-	defer njson.ReleaseLogStack(stack)
 
 	stack.New().
 		LInfo().
@@ -674,7 +670,6 @@ func (se *SSESocket) sendWriterTo(writer *sabuhp.SocketWriterTo, meta sabuhp.Mes
 	builder.WriteString("data: ")
 
 	var stack = njson.Log(se.logger)
-	defer njson.ReleaseLogStack(stack)
 
 	stack.New().
 		LInfo().

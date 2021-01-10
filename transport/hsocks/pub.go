@@ -104,7 +104,6 @@ func (htp *HttpServlet) HandleMessage(
 	var clientId = r.Header.Get(ClientIdentificationHeader)
 
 	var stack = njson.Log(htp.logger)
-	defer njson.ReleaseLogStack(stack)
 
 	stack.New().
 		LInfo().
@@ -372,7 +371,6 @@ func (se *ServletSocket) SendToAll(msg *sabuhp.Message, ts time.Duration) error 
 
 func (se *ServletSocket) Start() error {
 	var stack = njson.Log(se.logger)
-	defer njson.ReleaseLogStack(stack)
 
 	var decodedMessage, decodedErr = se.transposer.Transpose(se.req, se.params)
 	if decodedErr != nil {

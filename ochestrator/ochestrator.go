@@ -205,7 +205,6 @@ func DefaultRouterWithNotFound(
 		Translator: translator,
 		NotFound: sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
 			var logStack = njson.Log(logger)
-			defer njson.ReleaseLogStack(logStack)
 
 			logStack.New().
 				LDebug().
@@ -255,7 +254,6 @@ func DefaultManager(
 		Logger:    logger,
 		OnClosure: func(socket sabuhp.Socket) {
 			var logStack = njson.Log(logger)
-			defer njson.ReleaseLogStack(logStack)
 
 			logStack.New().
 				LDebug().
@@ -268,7 +266,6 @@ func DefaultManager(
 		},
 		OnOpen: func(socket sabuhp.Socket) {
 			var logStack = njson.Log(logger)
-			defer njson.ReleaseLogStack(logStack)
 
 			logStack.New().
 				LDebug().
@@ -310,7 +307,6 @@ func DefaultWorkerHub(
 ) (*actions.ActionHub, error) {
 	return DefaultWorkerHubWithEscalation(ctx, logger, injector, registry, transport, func(escalation actions.Escalation, hub *actions.ActionHub) {
 		var logStack = njson.Log(logger)
-		defer njson.ReleaseLogStack(logStack)
 
 		var log = logStack.New().
 			LDebug().

@@ -56,7 +56,7 @@ func TestNewSSEHub(t *testing.T) {
 	var codec = &codecs.JsonCodec{}
 
 	var managerConfig = managers.ManagerConfig{
-		ID:        nxid.New(),
+		ID:        nxid.New().String(),
 		Transport: transport,
 		Codec:     codec,
 		Ctx:       controlCtx,

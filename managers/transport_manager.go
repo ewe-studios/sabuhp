@@ -45,7 +45,6 @@ func (tm *TransportManager) Conn() sabuhp.Conn {
 //
 func (tm *TransportManager) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
 	var logStack = njson.Log(tm.logger)
-	defer njson.ReleaseLogStack(logStack)
 
 	data.Delivery = sabuhp.SendToOne
 	if data.OverridingTransport != nil {
@@ -81,7 +80,6 @@ func (tm *TransportManager) SendToOne(data *sabuhp.Message, timeout time.Duratio
 //
 func (tm *TransportManager) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
 	var logStack = njson.Log(tm.logger)
-	defer njson.ReleaseLogStack(logStack)
 
 	data.Delivery = sabuhp.SendToAll
 	if data.OverridingTransport != nil {
@@ -124,7 +122,6 @@ func (tm *TransportManager) Send(message *sabuhp.Message, transport sabuhp.Trans
 
 func (tm *TransportManager) SendWithTimeout(message *sabuhp.Message, transport sabuhp.Transport, timeout time.Duration) sabuhp.MessageErr {
 	var logStack = njson.Log(tm.logger)
-	defer njson.ReleaseLogStack(logStack)
 
 	logStack.New().LInfo().
 		Message("message received for topic").
@@ -189,9 +186,6 @@ func (tm *TransportManager) UnlistenWithId(topic string, id nxid.ID) {
 }
 
 func (tm *TransportManager) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
-	var logStack = njson.Log(tm.logger)
-	defer njson.ReleaseLogStack(logStack)
-
 	var sub subInfo
 	sub.manager = tm
 	sub.topic = topic
@@ -204,9 +198,6 @@ func (tm *TransportManager) Listen(topic string, handler sabuhp.TransportRespons
 // ListenWithId creates a listener using specified id, this allows the unique id to represent
 // a possible subscription.
 func (tm *TransportManager) ListenWithId(id nxid.ID, topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
-	var logStack = njson.Log(tm.logger)
-	defer njson.ReleaseLogStack(logStack)
-
 	var sub subInfo
 	sub.id = id
 	sub.manager = tm
@@ -218,7 +209,6 @@ func (tm *TransportManager) ListenWithId(id nxid.ID, topic string, handler sabuh
 
 func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 	var logStack = njson.Log(tm.logger)
-	defer njson.ReleaseLogStack(logStack)
 
 	logStack.New().LInfo().
 		Message("adding subscription for topic").
@@ -281,7 +271,6 @@ func (tm *TransportManager) listenTo(sub *subInfo) sabuhp.Channel {
 	tm.waiter.Add(1)
 	go func() {
 		var logStack = njson.Log(tm.logger)
-		defer njson.ReleaseLogStack(logStack)
 
 		defer tm.waiter.Done()
 
@@ -407,7 +396,6 @@ func (sc *subscriptionChannel) IsEmpty() bool {
 func (sc *subscriptionChannel) Remove(info subInfo) {
 	var doAction = func() {
 		var logStack = njson.Log(sc.logger)
-		defer njson.ReleaseLogStack(logStack)
 
 		delete(sc.subscriptions, info.id)
 
@@ -431,7 +419,6 @@ func (sc *subscriptionChannel) Add(info *subInfo) {
 
 	var doAction = func() {
 		var logStack = njson.Log(sc.logger)
-		defer njson.ReleaseLogStack(logStack)
 
 		if _, hasSub := sc.subscriptions[info.id]; !hasSub {
 			sc.subscriptions[info.id] = info.handler
@@ -465,7 +452,6 @@ func (sc *subscriptionChannel) Notify(msg *sabuhp.Message, transport sabuhp.Tran
 
 func (sc *subscriptionChannel) NotifyWithTimeout(msg *sabuhp.Message, transport sabuhp.Transport, timeout time.Duration) {
 	var logStack = njson.Log(sc.logger)
-	defer njson.ReleaseLogStack(logStack)
 
 	logStack.New().LInfo().
 		Message("received new message").
@@ -475,7 +461,7 @@ func (sc *subscriptionChannel) NotifyWithTimeout(msg *sabuhp.Message, transport 
 
 	var doDistribution = func() {
 		var logStack = njson.Log(sc.logger)
-		defer njson.ReleaseLogStack(logStack)
+
 		logStack.New().Message("notifying all handlers with message").
 			String("topic", sc.topic).
 			End()
@@ -542,7 +528,6 @@ func (sc *subscriptionChannel) NotifyWithTimeout(msg *sabuhp.Message, transport 
 
 func (sc *subscriptionChannel) Run() {
 	var logStack = njson.Log(sc.logger)
-	defer njson.ReleaseLogStack(logStack)
 
 	logStack.New().LInfo().
 		Message("starting subscription management loop").
