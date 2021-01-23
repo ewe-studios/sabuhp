@@ -142,6 +142,28 @@ type Message struct {
 	OverridingTransport Transport `json:"-" messagepack:"-" gob:"-"`
 }
 
+// ReplyTo returns a new instance of a Message using the FromAddr as the
+// topic.
+func (m *Message) ReplyTo() *Message {
+	return &Message{
+		ID: nxid.New(),
+		Topic: m.FromAddr,
+		Params: Params{},
+		Metadata: Params{},
+	}
+}
+
+// ReplyToWith returns a new instance of a Message using the FromAddr as the
+// topic.
+func (m *Message) ReplyToWith(params Params, meta Params, payload []byte) *Message {
+	return &Message{
+		Params: params,
+		Metadata: meta,
+		ID: nxid.New(),
+		Topic: m.FromAddr,
+	}
+}
+
 func NewMessage(topic string, fromAddr string, payload []byte) *Message {
 	return &Message{
 		ID:       nxid.New(),
