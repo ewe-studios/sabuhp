@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 var msg = sabuhp.NewMessage("why", "me", []byte("yes"))

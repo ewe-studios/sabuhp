@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/injectors"
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/ewe-studios/sabuhp/injectors"
+	"github.com/ewe-studios/sabuhp/testingutils"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
@@ -130,7 +130,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	require.NoError(t, pubb.SendToAll(&sabuhp.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
-		Payload:  sabuhp.BinaryPayload("alex"),
+		Bytes:    sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}, 0))
 
@@ -205,7 +205,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 			if err := sub.SendToAll(&sabuhp.Message{
 				Topic:    "say_hello",
 				FromAddr: to,
-				Payload:  sabuhp.BinaryPayload("slave from hello"),
+				Bytes:    sabuhp.BinaryPayload("slave from hello"),
 				Metadata: nil,
 			}, 0); err != nil {
 				log.Print(err.Error())
@@ -220,7 +220,7 @@ func TestNewActionHub_WithEmptyTemplateRegistryWithSlaves(t *testing.T) {
 	require.NoError(t, pubb.SendToAll(&sabuhp.Message{
 		FromAddr: "yay",
 		Topic:    "say_hello/slaves/hello_slave",
-		Payload:  sabuhp.BinaryPayload("alex"),
+		Bytes:    sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}, 0))
 
@@ -297,7 +297,7 @@ func TestNewActionHub_WithEmptyTemplateRegistry(t *testing.T) {
 	require.NoError(t, pubb.SendToAll(&sabuhp.Message{
 		Topic:    "say_hello",
 		FromAddr: "yay",
-		Payload:  sabuhp.BinaryPayload("alex"),
+		Bytes:    sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}, 0))
 
@@ -324,7 +324,7 @@ func sayHelloAction(ctx context.Context, ack chan struct{}) WorkGroupCreator {
 			_ = sub.SendToAll(&sabuhp.Message{
 				Topic:    message.FromAddr,
 				FromAddr: to,
-				Payload:  sabuhp.BinaryPayload("Hello"),
+				Bytes:    sabuhp.BinaryPayload("Hello"),
 				Metadata: nil,
 			}, 0)
 

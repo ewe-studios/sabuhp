@@ -8,16 +8,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influx6/sabuhp/codecs"
-	"github.com/influx6/sabuhp/utils/collectors"
+	"github.com/influx6/npkg/nthen"
+
+	"github.com/ewe-studios/sabuhp/codecs"
 
 	"github.com/influx6/npkg/nunsafe"
 
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp/utils"
 
+	"github.com/ewe-studios/sabuhp"
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -52,9 +53,38 @@ func (r *Channel) Close() {
 	}
 }
 
-var _ sabuhp.Transport = (*PubSub)(nil)
+var _ sabuhp.MessageBus = (*MessageRail)(nil)
 
-type PubSubConfig struct {
+var _ sabuhp.Channel = (*redisSubscription)(nil)
+
+type redisSubscription struct {
+	host       *MessageRail
+	id         nxid.ID
+	topic      string
+	pub        *redis.PubSub
+	ctx        context.Context
+	cancel     context.CancelFunc
+	initialMsg chan interface{}
+	stream     *redis.StatusCmd
+	err        error
+}
+
+func (r *redisSubscription) Close() {
+	r.err = r.pub.Close()
+}
+
+func (r *redisSubscription) Err() error {
+	return r.err
+}
+
+type MessageChannel int
+
+const (
+	RedisPubSub MessageChannel = iota
+	RedisStreams
+)
+
+type Config struct {
 	Logger                    sabuhp.Logger
 	Ctx                       context.Context
 	Codec                     sabuhp.Codec
@@ -66,12 +96,12 @@ type PubSubConfig struct {
 	MaxMessageBatchWait       time.Duration
 }
 
-func (b *PubSubConfig) ensure() {
+func (b *Config) ensure() {
 	if b.Logger == nil {
-		panic("PubSubConfig.Logger is required")
+		panic("Config.Logger is required")
 	}
 	if b.Ctx == nil {
-		panic("PubSubConfig.ctx is required")
+		panic("Config.ctx is required")
 	}
 	if b.Codec == nil {
 		b.Codec = &codecs.MessagePackCodec{}
@@ -93,139 +123,100 @@ func (b *PubSubConfig) ensure() {
 	}
 }
 
-type PubSub struct {
-	config           PubSubConfig
-	logger           sabuhp.Logger
-	client           *redis.Client
-	ctx              context.Context
-	canceller        context.CancelFunc
-	waiter           sync.WaitGroup
-	starter          sync.Once
-	ender            sync.Once
-	doAction         chan func()
-	subscriptions    map[string]redisSub
-	sendToOneBatches *collectors.MessageCollection
-	sendToAllBatches *collectors.MessageCollection
+type MessageRail struct {
+	config        Config
+	logger        sabuhp.Logger
+	client        *redis.Client
+	ctx           context.Context
+	canceller     context.CancelFunc
+	waiter        sync.WaitGroup
+	starter       sync.Once
+	stopper       sync.Once
+	doAction      chan func()
+	channel       MessageChannel
+	subscriptions []sabuhp.Channel
 }
 
-type redisSub struct {
-	id         nxid.ID
-	pub        *redis.PubSub
-	topic      string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	initialMsg chan interface{}
-}
-
-func NewRedisPubSub(config PubSubConfig) (*PubSub, error) {
-	config.ensure()
-
-	var newCtx, canceler = context.WithCancel(config.Ctx)
-
+func Stream(config Config) (*MessageRail, error) {
 	var client = redis.NewClient(&config.Redis)
-	var status = client.Ping(newCtx)
+	var status = client.Ping(config.Ctx)
 	if statusErr := status.Err(); statusErr != nil {
-		canceler()
 		return nil, nerror.WrapOnly(statusErr)
 	}
-
-	var pubsub = &PubSub{
-		config:        config,
-		logger:        config.Logger,
-		client:        client,
-		ctx:           newCtx,
-		canceller:     canceler,
-		doAction:      make(chan func()),
-		subscriptions: map[string]redisSub{},
-	}
-
-	pubsub.sendToAllBatches = collectors.NewMessageCollection(
-		newCtx,
-		config.MaxMessageBatch,
-		config.MaxMessageBatchWait,
-		pubsub.handleSendToAllMessageBatch,
-	)
-	pubsub.sendToOneBatches = collectors.NewMessageCollection(
-		newCtx,
-		config.MaxMessageBatch,
-		config.MaxMessageBatchWait,
-		pubsub.handleSendToOneMessageBatch,
-	)
-
-	return pubsub, nil
+	return NewMessageRail(config, client, RedisStreams), nil
 }
 
-func (r *PubSub) Wait() {
+func PubSub(config Config) (*MessageRail, error) {
+	var client = redis.NewClient(&config.Redis)
+	var status = client.Ping(config.Ctx)
+	if statusErr := status.Err(); statusErr != nil {
+		return nil, nerror.WrapOnly(statusErr)
+	}
+	return NewMessageRail(config, client, RedisPubSub), nil
+}
+
+func NewMessageRail(config Config, client *redis.Client, channel MessageChannel) *MessageRail {
+	config.ensure()
+	var newCtx, canceler = context.WithCancel(config.Ctx)
+	var pubsub = &MessageRail{
+		config:    config,
+		logger:    config.Logger,
+		client:    client,
+		ctx:       newCtx,
+		canceller: canceler,
+		channel:   channel,
+		doAction:  make(chan func()),
+	}
+	return pubsub
+}
+
+func (r *MessageRail) Wait() {
 	r.waiter.Wait()
 }
 
-func (r *PubSub) Start() {
-	r.sendToOneBatches.Start()
-	r.sendToAllBatches.Start()
+func (r *MessageRail) Start() {
 	r.starter.Do(func() {
 		r.waiter.Add(1)
 		go r.manage()
 	})
 }
 
-func (r *PubSub) Stop() {
-	r.sendToOneBatches.Stop()
-	r.sendToAllBatches.Stop()
-	r.ender.Do(func() {
+func (r *MessageRail) Stop() {
+	r.stopper.Do(func() {
 		r.canceller()
 		r.waiter.Wait()
 	})
 }
 
-func (r *PubSub) Conn() sabuhp.Conn {
-	return r.client
+func (r *MessageRail) Listen(topic string, grp string, handler sabuhp.TransportResponse) sabuhp.Channel {
+	if r.channel == RedisStreams {
+		return r.ListenStream(topic, grp, handler)
+	}
+	return r.ListenPubSub(topic, grp, handler)
 }
 
-func (r *PubSub) UnListen(topic string) {
-	var doFunc = func() {
-		var sub = r.subscriptions[topic]
-		delete(r.subscriptions, topic)
-		sub.cancel()
-	}
-
-	select {
-	case r.doAction <- doFunc:
-		return
-	case <-r.ctx.Done():
-		return
-	}
-}
-
-func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
+func (r *MessageRail) ListenStream(streamTopic string, grp string, handler sabuhp.TransportResponse) sabuhp.Channel {
 	var result = make(chan sabuhp.Channel, 1)
 
 	r.waiter.Add(2)
 	var doFunc = func() {
-		if _, hasSub := r.subscriptions[topic]; hasSub {
-			var rs = new(redisSubscription)
-			rs.topic = topic
-			rs.host = r
-			rs.err = nerror.New(SubscriptionExistsAlready)
-			result <- rs
-			return
-		}
-
-		var pub = r.client.PSubscribe(r.ctx, topic)
-		var streamName = fmt.Sprintf("%s_stream", topic)
-		var streamGroupName = fmt.Sprintf("%s_stream_group", topic)
+		var streamGroupName = fmt.Sprintf("%s_%s_stream_group", streamTopic, grp)
 
 		var rs = new(redisSubscription)
-		rs.topic = topic
+		rs.id = nxid.New()
+		rs.topic = streamTopic
 		rs.host = r
 
 		r.logger.Log(njson.MJSON("Creating stream group for topic", func(encoder npkg.Encoder) {
-			encoder.String("topic", topic)
+			encoder.String("topic", streamTopic)
 			encoder.Int("_level", int(npkg.INFO))
-			encoder.String("stream_name", streamName)
+			encoder.String("stream_name", streamTopic)
 			encoder.String("stream_group_name", streamGroupName)
 		}))
 
-		var streamGroup = r.client.XGroupCreateMkStream(r.ctx, streamName, streamGroupName, "$")
+		var streamGroup = r.client.XGroupCreateMkStream(r.ctx, streamTopic, streamGroupName, "$")
+		rs.stream = streamGroup
+
 		if streamResponseErr := streamGroup.Err(); streamResponseErr != nil {
 			if !strings.Contains(streamResponseErr.Error(), GroupExistErrorMsg) {
 				// close waiter
@@ -238,72 +229,19 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 			}
 		}
 
-		var err error
-		var firstMessage interface{}
-
-		r.logger.Log(njson.MJSON("Checking for pubsub registered event", func(encoder npkg.Encoder) {
-			encoder.String("topic", topic)
-			encoder.Int("_level", int(npkg.INFO))
-			encoder.String("stream_name", streamName)
-			encoder.String("stream_group_name", streamGroupName)
-		}))
-
-		for i := 0; i < r.config.MaxWaitForSubRetry; i++ {
-			if firstMessage, err = pub.ReceiveTimeout(r.ctx, r.config.MaxWaitForSubConfirmation); err == nil {
-				break
-			}
-		}
-
-		r.logger.Log(njson.MJSON("Received pubsub first message", func(encoder npkg.Encoder) {
-			encoder.String("topic", topic)
-			encoder.Int("_level", int(npkg.INFO))
-			encoder.String("stream_name", streamName)
-			encoder.String("stream_group_name", streamGroupName)
-			encoder.String("message", fmt.Sprintf("%#v", firstMessage))
-		}))
-
-		if firstErrMsg, ok := firstMessage.(redis.Error); ok {
-
-			// close waiter
-			r.waiter.Done()
-			r.waiter.Done()
-
-			r.logger.Log(njson.MJSON("Received pubsub error", func(encoder npkg.Encoder) {
-				encoder.String("topic", topic)
-				encoder.Int("_level", int(npkg.INFO))
-				encoder.String("error", firstErrMsg.Error())
-				encoder.String("stream_name", streamName)
-				encoder.String("stream_group_name", streamGroupName)
-			}))
-
-			rs.err = firstErrMsg
-			result <- rs
-			return
-		}
-
-		var initialMessage = make(chan interface{}, 1)
-		initialMessage <- firstMessage
-
 		var ctx, canceler = context.WithCancel(r.ctx)
 
-		var rss redisSub
-		rss.id = nxid.New()
-		rss.pub = pub
-		rss.topic = topic
-		rss.ctx = ctx
-		rss.cancel = canceler
-		rss.initialMsg = initialMessage
+		rs.ctx = ctx
+		rs.cancel = canceler
 
 		// register sub with subscriptions
-		r.subscriptions[topic] = rss
+		r.subscriptions = append(r.subscriptions, rs)
 
-		var pubChan = pub.Channel()
-		go r.listenForChannel(ctx, handler, &rss, pubChan)
-		go r.listenForStream(ctx, handler, &rss, streamName, streamGroupName)
+		go r.listenForStream(ctx, handler, rs, streamTopic, streamGroupName)
 
 		r.logger.Log(njson.MJSON("Launched pubsub channel and stream readers", func(encoder npkg.Encoder) {
-			encoder.String("topic", topic)
-			encoder.String("stream_name", streamName)
+			encoder.String("topic", streamTopic)
+			encoder.String("stream_name", streamTopic)
 			encoder.Int("_level", int(npkg.INFO))
 			encoder.String("stream_group_name", streamGroupName)
 		}))
@@ -319,26 +257,96 @@ func (r *PubSub) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.C
 	}
 }
 
-var _ sabuhp.Channel = (*redisSubscription)(nil)
+func (r *MessageRail) ListenPubSub(topic string, _ string, handler sabuhp.TransportResponse) sabuhp.Channel {
+	var result = make(chan sabuhp.Channel, 1)
 
-type redisSubscription struct {
-	host  *PubSub
-	topic string
-	err   error
+	r.waiter.Add(2)
+	var doFunc = func() {
+		var pub = r.client.PSubscribe(r.ctx, topic)
+
+		var rs = new(redisSubscription)
+		rs.id = nxid.New()
+		rs.topic = topic
+		rs.host = r
+
+		r.logger.Log(njson.MJSON("Creating stream group for topic", func(encoder npkg.Encoder) {
+			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
+		}))
+
+		var err error
+		var firstMessage interface{}
+
+		r.logger.Log(njson.MJSON("Checking for pubsub registered event", func(encoder npkg.Encoder) {
+			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
+		}))
+
+		for i := 0; i < r.config.MaxWaitForSubRetry; i++ {
+			if firstMessage, err = pub.ReceiveTimeout(r.ctx, r.config.MaxWaitForSubConfirmation); err == nil {
+				break
+			}
+		}
+
+		r.logger.Log(njson.MJSON("Received pubsub first message", func(encoder npkg.Encoder) {
+			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
+			encoder.String("message", fmt.Sprintf("%#v", firstMessage))
+		}))
+
+		if firstErrMsg, ok := firstMessage.(redis.Error); ok {
+
+			// close waiter
+			r.waiter.Done()
+			r.waiter.Done()
+
+			r.logger.Log(njson.MJSON("Received pubsub error", func(encoder npkg.Encoder) {
+				encoder.String("topic", topic)
+				encoder.Int("_level", int(npkg.INFO))
+				encoder.String("error", firstErrMsg.Error())
+			}))
+
+			rs.err = firstErrMsg
+			result <- rs
+			return
+		}
+
+		var initialMessage = make(chan interface{}, 1)
+		initialMessage <- firstMessage
+
+		var ctx, canceler = context.WithCancel(r.ctx)
+
+		rs.pub = pub
+		rs.topic = topic
+		rs.ctx = ctx
+		rs.cancel = canceler
+		rs.initialMsg = initialMessage
+
+		r.subscriptions = append(r.subscriptions, rs)
+
+		var pubChan = pub.Channel()
+		go r.listenForChannel(ctx, handler, rs, pubChan)
+
+		r.logger.Log(njson.MJSON("Launched pubsub channel and stream readers", func(encoder npkg.Encoder) {
+			encoder.String("topic", topic)
+			encoder.Int("_level", int(npkg.INFO))
+		}))
+
+		result <- rs
+	}
+
+	select {
+	case r.doAction <- doFunc:
+		return <-result
+	case <-r.ctx.Done():
+		return &utils.CloseErrorChannel{Error: nerror.WrapOnly(r.ctx.Err())}
+	}
 }
 
-func (r *redisSubscription) Close() {
-	r.host.UnListen(r.topic)
-}
-
-func (r *redisSubscription) Err() error {
-	return r.err
-}
-
-func (r *PubSub) listenForStream(
+func (r *MessageRail) listenForStream(
 	ctx context.Context,
 	handler sabuhp.TransportResponse,
-	pub *redisSub,
+	pub *redisSubscription,
 	streamName string,
 	streamGroupName string,
 ) {
@@ -449,7 +457,7 @@ doLoop:
 	}
 }
 
-func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportResponse, message redis.XMessage) bool {
+func (r *MessageRail) handleXMessage(topicName string, handler sabuhp.TransportResponse, message redis.XMessage) bool {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
 			r.logger.Log(njson.MJSON("panic occurred processing message", func(event npkg.Encoder) {
@@ -537,10 +545,10 @@ func (r *PubSub) handleXMessage(topicName string, handler sabuhp.TransportRespon
 	return true
 }
 
-func (r *PubSub) listenForChannel(
+func (r *MessageRail) listenForChannel(
 	ctx context.Context,
 	handler sabuhp.TransportResponse,
-	pub *redisSub,
+	pub *redisSubscription,
 	messages <-chan *redis.Message,
 ) {
 	defer func() {
@@ -583,7 +591,7 @@ doLoop:
 	}
 }
 
-func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.Message) {
+func (r *MessageRail) handleMessage(handler sabuhp.TransportResponse, message *redis.Message) {
 	defer func() {
 		var panicErr = nerror.New("panic occurred in redis.handleMessage")
 		if panicInfo := recover(); panicInfo != nil {
@@ -592,7 +600,7 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 				event.Int("_level", int(npkg.ERROR))
 				event.String("message", message.String())
 				event.String("panic_data", fmt.Sprintf("%#v", panicInfo))
-				event.String("panic_data", fmt.Sprintf("%+s", panicInfo))
+				event.String("panic_data", fmt.Sprintf("%s", panicInfo))
 			}))
 		}
 	}()
@@ -627,28 +635,55 @@ func (r *PubSub) handleMessage(handler sabuhp.TransportResponse, message *redis.
 	}
 }
 
-func (r *PubSub) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
-	return r.sendToOneBatches.TakeTill(data, timeout)
+func (r *MessageRail) Send(data ...*sabuhp.Message) []*nthen.Future {
+	return r.sendChannelBatch(data, r.channel)
 }
 
-func (r *PubSub) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
-	return r.sendToAllBatches.TakeTill(data, timeout)
-}
-
-func (r *PubSub) handleSendToOneMessageBatch(batch chan *sabuhp.Message) {
+func (r *MessageRail) sendChannelBatch(batch []*sabuhp.Message, channel MessageChannel) []*nthen.Future {
 	var pipelining = r.client.Pipeline()
-	var totalMessages = len(batch)
-	var messages = make([]*sabuhp.Message, 0, totalMessages)
 
-	for i := 0; i < totalMessages; i++ {
-		var msg = <-batch
-		messages = append(messages, msg)
-		if addErr := r.sendToOne(msg, pipelining); addErr != nil {
+	var results = make([]*nthen.Future, len(batch))
+	for index, msg := range batch {
+		var ft = nthen.NewFuture()
+		results[index] = ft
+
+		var encodedData, encodeErr = r.config.Codec.Encode(msg)
+		if encodeErr != nil {
+			_ = ft.WithError(encodeErr)
+
+			r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
+				event.String("topic", msg.Topic)
+				event.Int("_level", int(npkg.ERROR))
+				event.String("from_addr", msg.FromAddr)
+				event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
+				event.String("error", encodeErr.Error())
+			}))
+			continue
+		}
+
+		// publish to streams
+		if channel == RedisStreams {
+			if addErr := r.sendStream(msg.Topic, encodedData, pipelining); addErr != nil {
+				_ = ft.WithError(addErr)
+				r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
+					event.String("topic", msg.Topic)
+					event.String("from_addr", msg.FromAddr)
+					event.Int("_level", int(npkg.ERROR))
+					event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
+					event.String("error", addErr.Error())
+				}))
+			}
+			continue
+		}
+
+		// publish to pubsub
+		if addErr := r.sendPubSub(msg.Topic, encodedData, pipelining); addErr != nil {
+			_ = ft.WithError(addErr)
 			r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
 				event.String("topic", msg.Topic)
 				event.String("from_addr", msg.FromAddr)
 				event.Int("_level", int(npkg.ERROR))
-				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
+				event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
 				event.String("error", addErr.Error())
 			}))
 		}
@@ -656,100 +691,46 @@ func (r *PubSub) handleSendToOneMessageBatch(batch chan *sabuhp.Message) {
 
 	var execResults, execErr = pipelining.Exec(r.ctx)
 	if execErr != nil {
+		for _, ft := range results {
+			_ = ft.WithError(execErr)
+		}
+
 		r.logger.Log(njson.MJSON("failed to execute pipeline", func(event npkg.Encoder) {
 			event.String("error", execErr.Error())
 			event.Int("_level", int(npkg.ERROR))
 		}))
-		return
+
+		return results
 	}
 
 	for index, execResult := range execResults {
-		var msg = messages[index]
+		var msg = batch[index]
+		var ft = results[index]
+
 		if execErr := execResult.Err(); execErr != nil {
+			_ = ft.WithError(execErr)
+
 			r.logger.Log(njson.MJSON("failed to publish message", func(event npkg.Encoder) {
 				event.String("from_addr", msg.FromAddr)
-				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
+				event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
 				event.Int("_level", int(npkg.ERROR))
 				event.String("error", execErr.Error())
 			}))
 
-			// add back into queue
-			_ = r.sendToOneBatches.Take(msg)
 			continue
 		}
 
 		r.logger.Log(njson.MJSON("published message to pubsub", func(event npkg.Encoder) {
 			event.String("from_addr", msg.FromAddr)
 			event.Int("_level", int(npkg.INFO))
-			event.String("payload", fmt.Sprintf("%#v", msg.Payload))
+			event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
 		}))
 	}
+
+	return results
 }
 
-func (r *PubSub) handleSendToAllMessageBatch(batch chan *sabuhp.Message) {
-	var pipelining = r.client.Pipeline()
-	var totalMessages = len(batch)
-	var messages = make([]*sabuhp.Message, 0, totalMessages)
-	for i := 0; i < totalMessages; i++ {
-		var msg = <-batch
-		messages = append(messages, msg)
-		if addErr := r.sendToAll(msg, pipelining); addErr != nil {
-			r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
-				event.String("topic", msg.Topic)
-				event.String("from_addr", msg.FromAddr)
-				event.Int("_level", int(npkg.ERROR))
-				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
-				event.String("error", addErr.Error())
-			}))
-		}
-	}
-
-	var execResults, execErr = pipelining.Exec(r.ctx)
-	if execErr != nil {
-		r.logger.Log(njson.MJSON("failed to execute pipeline", func(event npkg.Encoder) {
-			event.String("error", execErr.Error())
-		}))
-		return
-	}
-
-	for index, execResult := range execResults {
-		var msg = messages[index]
-		if execErr := execResult.Err(); execErr != nil {
-			r.logger.Log(njson.MJSON("failed to publish message", func(event npkg.Encoder) {
-				event.String("from_addr", msg.FromAddr)
-				event.Int("_level", int(npkg.ERROR))
-				event.String("payload", fmt.Sprintf("%#v", msg.Payload))
-				event.String("error", execErr.Error())
-			}))
-
-			// add back into queue
-			_ = r.sendToAllBatches.Take(msg)
-			continue
-		}
-
-		r.logger.Log(njson.MJSON("published message to pubsub", func(event npkg.Encoder) {
-			event.String("from_addr", msg.FromAddr)
-			event.Int("_level", int(npkg.INFO))
-			event.String("payload", fmt.Sprintf("%#v", msg.Payload))
-		}))
-	}
-}
-
-func (r *PubSub) sendToOne(data *sabuhp.Message, pipelined redis.Pipeliner) error {
-	data.Delivery = sabuhp.SendToOne
-	var encodedData, encodeErr = r.config.Codec.Encode(data)
-	if encodeErr != nil {
-		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
-			event.String("topic", data.Topic)
-			event.Int("_level", int(npkg.ERROR))
-			event.String("from_addr", data.FromAddr)
-			event.String("payload", fmt.Sprintf("%#v", data.Payload))
-			event.String("error", encodeErr.Error())
-		}))
-		return nerror.WrapOnly(encodeErr)
-	}
-
-	var streamName = fmt.Sprintf("%s_stream", data.Topic)
+func (r *MessageRail) sendStream(streamName string, encodedData []byte, pipelined redis.Pipeliner) error {
 	var xmessage = redis.XAddArgs{
 		Stream:       streamName,
 		MaxLen:       0,
@@ -763,13 +744,12 @@ func (r *PubSub) sendToOne(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 	var responseCmd = pipelined.XAdd(r.ctx, &xmessage)
 	if resErr := responseCmd.Err(); resErr != nil {
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
-			event.String("topic", data.Topic)
+			event.String("topic", streamName)
 			event.String("error", resErr.Error())
 			event.Int("_level", int(npkg.ERROR))
-			event.String("from_addr", data.FromAddr)
-			event.String("payload", fmt.Sprintf("%#v", data.Payload))
+			event.String("payload", fmt.Sprintf("%#v", encodedData))
 		}))
-		return nerror.WrapOnly(encodeErr)
+		return nerror.WrapOnly(resErr)
 	}
 
 	r.logger.Log(njson.MJSON("sent new consumer group message", func(event npkg.Encoder) {
@@ -782,30 +762,16 @@ func (r *PubSub) sendToOne(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 	return nil
 }
 
-func (r *PubSub) sendToAll(data *sabuhp.Message, pipelined redis.Pipeliner) error {
-	data.Delivery = sabuhp.SendToAll
-	var encodedData, encodeErr = r.config.Codec.Encode(data)
-	if encodeErr != nil {
-		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
-			event.String("topic", data.Topic)
-			event.String("from_addr", data.FromAddr)
-			event.Int("_level", int(npkg.ERROR))
-			event.String("payload", fmt.Sprintf("%#v", data.Payload))
-			event.String("error", encodeErr.Error())
-		}))
-		return nerror.WrapOnly(encodeErr)
-	}
-
-	var responseCmd = pipelined.Publish(r.ctx, data.Topic, encodedData)
+func (r *MessageRail) sendPubSub(topic string, encodedData []byte, pipelined redis.Pipeliner) error {
+	var responseCmd = pipelined.Publish(r.ctx, topic, encodedData)
 	if resErr := responseCmd.Err(); resErr != nil {
 		r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
-			event.String("topic", data.Topic)
+			event.String("topic", topic)
 			event.String("error", resErr.Error())
 			event.Int("_level", int(npkg.ERROR))
-			event.String("from_addr", data.FromAddr)
-			event.String("payload", fmt.Sprintf("%#v", data.Payload))
+			event.String("payload", fmt.Sprintf("%#v", encodedData))
 		}))
-		return nerror.WrapOnly(encodeErr)
+		return nerror.WrapOnly(resErr)
 	}
 
 	r.logger.Log(njson.MJSON("sent new pubsub message", func(event npkg.Encoder) {
@@ -818,14 +784,14 @@ func (r *PubSub) sendToAll(data *sabuhp.Message, pipelined redis.Pipeliner) erro
 	return nil
 }
 
-func (r *PubSub) manage() {
+func (r *MessageRail) manage() {
 	defer func() {
 		var subs = r.subscriptions
-		r.subscriptions = map[string]redisSub{}
+		r.subscriptions = nil
 
 		// close all subscriptions
 		for _, subs := range subs {
-			subs.cancel()
+			subs.Close()
 		}
 
 		r.waiter.Done()

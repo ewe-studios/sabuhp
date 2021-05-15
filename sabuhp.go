@@ -1,15 +1,12 @@
 package sabuhp
 
 import (
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/influx6/npkg"
-
-	"github.com/influx6/npkg/nxid"
-
 	"github.com/influx6/npkg/njson"
+	"github.com/influx6/npkg/nnet"
 )
 
 type RetryFunc func(last int) time.Duration
@@ -23,6 +20,8 @@ type Logger interface {
 // to define the point at which the channel should be
 // closed and stopped from receiving updates.
 type Channel interface {
+	Topic() string
+	Group() string
 	Close()
 	Err() error
 }
@@ -112,36 +111,10 @@ func (h Header) Delete(k string) {
 	delete(h, k)
 }
 
-type TransportResponse interface {
-	Handle(*Message, Transport) MessageErr
-}
-
-type TransportResponseFunc func(*Message, Transport) MessageErr
-
-func (t TransportResponseFunc) Handle(message *Message, tr Transport) MessageErr {
-	return t(message, tr)
-}
-
-type HeaderModifications func(header http.Header)
-
-// Transposer transforms a http request into a Message to be
+// BytesDecoder transforms a http request into a Message to be
 // delivered.
-type Transposer interface {
-	Transpose(req *http.Request, params Params) (*Message, error)
-}
-
-// WrappedTransposer transforms a http request into a Message to be
-// delivered.
-type WrappedTransposer interface {
-	Transpose([]byte) (*Message, *WrappedPayload, error)
-}
-
-// Translator transforms a message into an appropriate response
-// to an http response object.
-type Translator interface {
-	Translate(req http.ResponseWriter, message *Message) error
-	TranslateBytes(req http.ResponseWriter, data []byte, message MessageMeta) error
-	TranslateWriter(req http.ResponseWriter, w io.WriterTo, meta MessageMeta) error
+type BytesDecoder interface {
+	Decode([]byte) (*Message, error)
 }
 
 // Matcher is the interface that all Matchers should be implemented
@@ -171,6 +144,29 @@ type HttpMatcher interface {
 	Handler
 
 	Match(http.ResponseWriter, *http.Request, Params)
+}
+
+type Transport struct {
+	Bus MessageBus
+	Socket Socket
+}
+
+type TransportResponse interface {
+	Handle(Message, Transport) MessageErr
+}
+
+type TransportResponseFunc func(Message, Transport) MessageErr
+
+func (t TransportResponseFunc) Handle(message Message, tr Transport) MessageErr {
+	return t(message, tr)
+}
+
+// MessageBus defines what an underline message transport implementation
+// like a message bus or rpc connection that can deliver according to
+// required semantics of one-to-one and one-to-many.
+type MessageBus interface {
+	Send(data ...Message)
+	Listen(topic string, grp string, handler TransportResponse) Channel
 }
 
 type (
@@ -223,6 +219,10 @@ func (w Wrappers) ForFunc(mainFunc TransportResponseFunc) TransportResponse {
 	return w.For(mainFunc)
 }
 
+type LocationService interface {
+	Get(ipAddress string) (nnet.Location, error)
+}
+
 // Pre starts a chain of handlers for wrapping a "main route handler"
 // the registered "middleware" will run before the main handler(see `Wrappers#For/ForFunc`).
 //
@@ -234,26 +234,11 @@ func Pre(middleware ...Wrapper) Wrappers {
 	return Wrappers(middleware)
 }
 
-// Transport defines what an underline message transport implementation
-// like a message bus or rpc connection that can deliver according to
-// required semantics of one-to-one and one-to-many.
-type Transport interface {
-	Conn() Conn
-
-	Listen(topic string, handler TransportResponse) Channel
-	SendToOne(data *Message, timeout time.Duration) error
-	SendToAll(data *Message, timeout time.Duration) error
-}
-
 type LogHandler func([]*Message)
-
-type MessageLog interface {
-	Clear(owner nxid.ID) error
-	Persist(owner nxid.ID, message *Message) error
-	CatchUp(owner nxid.ID, lastId nxid.ID, handler Handler) error
-}
 
 type MessageRouter interface {
 	TransportResponse
 	Matcher
 }
+
+

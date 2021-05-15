@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/ewe-studios/sabuhp/testingutils"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
@@ -44,7 +44,7 @@ func TestMailer(t *testing.T) {
 	var message = &sabuhp.Message{
 		Topic:    "hello",
 		FromAddr: "yay",
-		Payload:  sabuhp.BinaryPayload("alex"),
+		Bytes:    sabuhp.BinaryPayload("alex"),
 		Metadata: nil,
 	}
 
@@ -59,7 +59,7 @@ func TestMailer(t *testing.T) {
 	var sendWaiter sync.WaitGroup
 	sendWaiter.Add(2)
 
-	var channel = pubsub.Listen("hello", sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
+	var channel = pubsub.Listen("hello", sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.MessageBus) sabuhp.MessageErr {
 		defer sendWaiter.Done()
 		require.NotNil(t, data)
 		require.NotNil(t, sub)

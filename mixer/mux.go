@@ -3,8 +3,8 @@ package mixer
 import (
 	"strings"
 
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/utils"
 )
 
 type Handler interface {
@@ -58,7 +58,7 @@ func (m *Mux) Match(target string) bool {
 func (m *Mux) ServeRoute(d *sabuhp.Message) (*sabuhp.Message, error) {
 	var reqPath = d.Path
 	if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
-		// Remove trailing slash and client-permanent rule for redirection,
+		// remove trailing slash and client-permanent rule for redirection,
 		// if configuration allows that and reqPath has an extra slash.
 
 		// update the new reqPath and redirect.

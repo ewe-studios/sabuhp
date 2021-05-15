@@ -14,11 +14,11 @@ import (
 
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp/utils"
 )
 
 var (
@@ -156,7 +156,7 @@ func (sc *SSEClient) Wait() {
 
 func (sc *SSEClient) Send(method string, msg *sabuhp.Message, timeout time.Duration) error {
 	var header = http.Header{}
-	for k, v := range msg.Headers {
+	for k, v := range msg.Meta.Headers {
 		header[k] = v
 	}
 
@@ -289,18 +289,18 @@ doLoop:
 							End()
 						continue doLoop
 					}
-					if len(message.MessageMeta.Path) == 0 {
-						message.MessageMeta.Path = sc.request.URL.Path
+					if len(message.Meta.Path) == 0 {
+						message.Meta.Path = sc.request.URL.Path
 					}
 				} else {
 					var payload = make([]byte, len(dataLine))
 					_ = copy(payload, dataLine)
 
 					message = &sabuhp.Message{
-						Topic:    sc.request.URL.Path,
-						ID:       nxid.New(),
-						Delivery: sabuhp.SendToAll,
-						MessageMeta: sabuhp.MessageMeta{
+						Topic: sc.request.URL.Path,
+						Id:    nxid.New(),
+						Type:  sabuhp.RequestReply,
+						Meta: sabuhp.MessageMeta{
 							Path:            sc.request.URL.Path,
 							ContentType:     contentType,
 							Query:           url.Values{},
@@ -309,11 +309,9 @@ doLoop:
 							Cookies:         nil,
 							MultipartReader: nil,
 						},
-						Payload:             payload,
-						Metadata:            map[string]string{},
-						Params:              map[string]string{},
-						LocalPayload:        nil,
-						OverridingTransport: nil,
+						Bytes:    payload,
+						Metadata: map[string]string{},
+						Params:   map[string]string{},
 					}
 				}
 

@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/njson"
 )
@@ -23,7 +23,7 @@ func (n NoPubSubChannel) Close() {
 	// do nothing
 }
 
-var _ sabuhp.Transport = (*NoPubSub)(nil)
+var _ sabuhp.MessageBus = (*NoPubSub)(nil)
 
 type NoPubSub struct {
 	DelegateFunc  func(message *sabuhp.Message, timeout time.Duration) error

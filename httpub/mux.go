@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 // Mux is an HTTP request multiplexer.
@@ -157,7 +157,7 @@ func (m *Mux) Handle(r *Request) Response {
 	var reqPath = r.URL.Path
 	if m.PathCorrection {
 		if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
-			// Remove trailing slash and client-permanent rule for redirection,
+			// remove trailing slash and client-permanent rule for redirection,
 			// if confgiuration allows that and reqPath has an extra slash.
 
 			// update the new reqPath and redirect.
@@ -259,7 +259,7 @@ Four options to solve optionally "inherition" of parent's middlewares but dismis
 - Create a new function like `UseOnly` or `UseExplicit`
   which will remove any previous middlewares and use only the new one.
   But this has a problem of making the `Use` func to act differently and debugging will be a bit difficult if big app if called after the `UseOnly`.
-- Add a new func for creating new groups to remove any inherited middlewares from the parent.
+- add a new func for creating new groups to remove any inherited middlewares from the parent.
   But with this, we will have two functions for the same thing and users may be confused about this API design.
 - Put the options to the existing `Of` function, and make them optionally by functional design of options.
   But this will make things ugly and may confuse users as well, there is a better way.

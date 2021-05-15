@@ -11,7 +11,7 @@ import (
 
 	"github.com/influx6/npkg/nunsafe"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 // Transport defines what we expect from a handler of requests.

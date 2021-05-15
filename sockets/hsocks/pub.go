@@ -2,26 +2,22 @@ package hsocks
 
 import (
 	"context"
-	"io"
 	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
-	"time"
 
-	"github.com/influx6/sabuhp/transport/httpub"
+	"github.com/ewe-studios/sabuhp/httpub"
 
 	"github.com/influx6/npkg/njson"
 
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp/utils"
 
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp/managers"
-
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 const (
@@ -33,28 +29,31 @@ var _ sabuhp.Handler = (*HttpServlet)(nil)
 func ManagedHttpServlet(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	transposer sabuhp.Transposer,
-	translator sabuhp.Translator,
-	manager *managers.Manager,
+	decoder sabuhp.HttpDecoder,
+	encoder sabuhp.HttpEncoder,
 	optionalHeaders sabuhp.HeaderModifications,
 ) *HttpServlet {
 	return &HttpServlet{
-		ctx:             ctx,
-		logger:          logger,
-		manager:         manager,
-		translator:      translator,
-		transposer:      transposer,
-		optionalHeaders: optionalHeaders,
+		ctx:       ctx,
+		logger:    logger,
+		encoder:   encoder,
+		decoder:   decoder,
+		headerMod: optionalHeaders,
+		streams:   sabuhp.NewSocketServers(),
 	}
 }
 
 type HttpServlet struct {
-	logger          sabuhp.Logger
-	transposer      sabuhp.Transposer
-	translator      sabuhp.Translator
-	optionalHeaders sabuhp.HeaderModifications
-	ctx             context.Context
-	manager         *managers.Manager
+	logger    sabuhp.Logger
+	decoder   sabuhp.HttpDecoder
+	encoder   sabuhp.HttpEncoder
+	headerMod sabuhp.HeaderModifications
+	ctx       context.Context
+	streams   *sabuhp.SocketServers
+}
+
+func (htp *HttpServlet) Stream(server sabuhp.SocketService) {
+	htp.streams.Stream(server)
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -88,8 +87,8 @@ func (htp *HttpServlet) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.
 	htp.HandleMessage(w, r, p, "", nil)
 }
 
-func (htp *HttpServlet) HandleWithResponder(w http.ResponseWriter, r *http.Request, p sabuhp.Params, responder sabuhp.TransportResponse) {
-	htp.HandleMessage(w, r, p, "", responder)
+func (htp *HttpServlet) HandleWithResponder(w http.ResponseWriter, r *http.Request, p sabuhp.Params, handler sabuhp.SocketMessageHandler) {
+	htp.HandleMessage(w, r, p, "", handler)
 }
 
 // HandleMessage implements necessary logic to handle an incoming request and response life cycle.
@@ -99,7 +98,7 @@ func (htp *HttpServlet) HandleMessage(
 	r *http.Request,
 	p sabuhp.Params,
 	asEvent string,
-	overrideResponder sabuhp.TransportResponse,
+	handler sabuhp.SocketMessageHandler,
 ) {
 	var clientId = r.Header.Get(ClientIdentificationHeader)
 
@@ -112,18 +111,18 @@ func (htp *HttpServlet) HandleMessage(
 		End()
 
 	var socket = NewServletSocket(
-		clientId,
 		htp.ctx,
+		clientId,
+		htp.streams,
 		r,
 		w,
 		p,
 		htp.logger,
-		htp.transposer,
-		htp.translator,
-		htp.manager,
-		htp.optionalHeaders,
-		overrideResponder,
+		htp.decoder,
+		htp.encoder,
+		htp.headerMod,
 		asEvent,
+		handler,
 	)
 
 	stack.New().
@@ -132,7 +131,7 @@ func (htp *HttpServlet) HandleMessage(
 		String("client_id", clientId).
 		End()
 
-	htp.manager.ManageSocketOpened(socket)
+	htp.streams.SocketOpened(socket)
 
 	if startSocketErr := socket.Start(); startSocketErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -181,7 +180,7 @@ func (htp *HttpServlet) HandleMessage(
 		return
 	}
 
-	htp.manager.ManageSocketClosed(socket)
+	htp.streams.SocketClosed(socket)
 
 	stack.New().
 		LInfo().
@@ -199,60 +198,57 @@ func (htp *HttpServlet) HandleMessage(
 var _ sabuhp.Socket = (*ServletSocket)(nil)
 
 type ServletSocket struct {
-	clientId          string
-	xid               nxid.ID
-	asEvent           string
-	logger            sabuhp.Logger
-	req               *http.Request
-	res               http.ResponseWriter
-	ctx               context.Context
-	params            sabuhp.Params
-	canceler          context.CancelFunc
-	codec             sabuhp.Codec
-	manager           *managers.Manager
-	transposer        sabuhp.Transposer
-	translator        sabuhp.Translator
-	headers           sabuhp.HeaderModifications
-	overridingHandler sabuhp.TransportResponse
-	remoteAddr        net.Addr
-	localAddr         net.Addr
-
-	sent     int64
-	handled  int64
-	received int64
+	clientId   string
+	xid        nxid.ID
+	asEvent    string
+	streams    *sabuhp.SocketServers
+	logger     sabuhp.Logger
+	req        *http.Request
+	res        http.ResponseWriter
+	ctx        context.Context
+	params     sabuhp.Params
+	canceler   context.CancelFunc
+	decoder    sabuhp.HttpDecoder
+	encoder    sabuhp.HttpEncoder
+	headers    sabuhp.HeaderModifications
+	handler    sabuhp.SocketMessageHandler
+	remoteAddr net.Addr
+	localAddr  net.Addr
+	sent       int64
+	handled    int64
+	received   int64
 }
 
 func NewServletSocket(
-	clientId string,
 	ctx context.Context,
+	clientId string,
+	streams *sabuhp.SocketServers,
 	r *http.Request,
 	w http.ResponseWriter,
 	params sabuhp.Params,
 	logger sabuhp.Logger,
-	transposer sabuhp.Transposer,
-	translator sabuhp.Translator,
-	manager *managers.Manager,
-	optionalHeaders sabuhp.HeaderModifications,
-	overridingHandler sabuhp.TransportResponse,
+	decoder sabuhp.HttpDecoder,
+	encoder sabuhp.HttpEncoder,
+	headerMod sabuhp.HeaderModifications,
 	asEvent string,
+	handler sabuhp.SocketMessageHandler,
 ) *ServletSocket {
 	var newCtx, newCanceler = context.WithCancel(ctx)
 	return &ServletSocket{
-		req:               r,
-		res:               w,
-		asEvent:           asEvent,
-		logger:            logger,
-		clientId:          clientId,
-		ctx:               newCtx,
-		transposer:        transposer,
-		translator:        translator,
-		manager:           manager,
-		params:            params,
-		codec:             manager.Codec(),
-		xid:               nxid.New(),
-		headers:           optionalHeaders,
-		overridingHandler: overridingHandler,
-		canceler:          newCanceler,
+		req:      r,
+		res:      w,
+		streams:  streams,
+		asEvent:  asEvent,
+		logger:   logger,
+		clientId: clientId,
+		ctx:      newCtx,
+		decoder:  decoder,
+		encoder:  encoder,
+		params:   params,
+		handler:  handler,
+		xid:      nxid.New(),
+		headers:  headerMod,
+		canceler: newCanceler,
 		remoteAddr: &httpAddr{
 			network: "tcp",
 			addr:    r.RemoteAddr,
@@ -300,28 +296,18 @@ func (se *ServletSocket) LocalAddr() net.Addr {
 	return se.localAddr
 }
 
-// SendWriter implements the necessary method to send data across the writer to the
-// underline response object.
-func (se *ServletSocket) SendWriter(msgWriter io.WriterTo, meta sabuhp.MessageMeta, _ time.Duration) sabuhp.ErrorWaiter {
-	var socketWriter = sabuhp.NewSocketWriterTo(msgWriter)
-	if sendErr := se.translator.TranslateWriter(se.res, socketWriter, meta); sendErr != nil {
-		socketWriter.Abort(sendErr)
-		se.canceler()
-		return socketWriter
+func (se *ServletSocket) Send(msgs ...sabuhp.Message) {
+	for _, msg := range msgs {
+		var encodeErr = se.encoder.Encode(se.res, msg)
+		if msg.Future != nil {
+			if encodeErr != nil {
+				msg.Future.WithError(encodeErr)
+				continue
+			}
+			msg.Future.WithValue(nil)
+		}
 	}
-	// close write channel
-	se.canceler()
-	return socketWriter
-}
-
-func (se *ServletSocket) Send(msg []byte, meta sabuhp.MessageMeta, _ time.Duration) error {
-	if sendErr := se.translator.TranslateBytes(se.res, msg, meta); sendErr != nil {
-		se.canceler()
-		return nerror.WrapOnly(sendErr)
-	}
-	// close write channel
-	se.canceler()
-	return nil
+	se.Stop()
 }
 
 func (se *ServletSocket) Wait() {
@@ -349,30 +335,18 @@ func (se *ServletSocket) Conn() sabuhp.Conn {
 	return se.req
 }
 
-func (se *ServletSocket) Listen(_ string, _ sabuhp.TransportResponse) sabuhp.Channel {
-	return &sabuhp.ErrChannel{
-		Error: nerror.New("not supported"),
-	}
-}
-
-func (se *ServletSocket) SendToOne(msg *sabuhp.Message, ts time.Duration) error {
-	if sendErr := se.translator.Translate(se.res, msg); sendErr != nil {
-		se.canceler()
-		return nerror.WrapOnly(sendErr)
-	}
-	// close write channel
-	se.canceler()
-	return nil
-}
-
-func (se *ServletSocket) SendToAll(msg *sabuhp.Message, ts time.Duration) error {
-	return se.SendToOne(msg, ts)
+func (se *ServletSocket) Listen(handler sabuhp.SocketMessageHandler) {
+	se.handler = handler
 }
 
 func (se *ServletSocket) Start() error {
+	if se.handler == nil {
+		return nerror.New("failed to start servlet socket")
+	}
+
 	var stack = njson.Log(se.logger)
 
-	var decodedMessage, decodedErr = se.transposer.Transpose(se.req, se.params)
+	var decodedMessages, decodedErr = se.decoder.Decode(se.req, se.params)
 	if decodedErr != nil {
 		var statusCode int
 		if nerror.IsAny(decodedErr, sabuhp.BodyToLargeErr) {
@@ -407,27 +381,16 @@ func (se *ServletSocket) Start() error {
 
 	// if we have being scoped to specific event name, use that.
 	if se.asEvent != "" {
-		decodedMessage.Topic = se.asEvent
+		for _, dm := range decodedMessages {
+			dm.Topic = se.asEvent
+		}
 	}
 
-	atomic.AddInt64(&se.received, 1)
-	stack.New().
-		LInfo().
-		Message("received new data from client").
-		Object("message", decodedMessage).
-		End()
-
-	decodedMessage.OverridingTransport = se
+	atomic.AddInt64(&se.received, int64(len(decodedMessages)))
 
 	// overridingHandler overrides sending message to the manager
 	// by using provided TransportResponse to handle message.
-	var handleErr error
-	if se.overridingHandler != nil {
-		handleErr = se.overridingHandler.Handle(decodedMessage, se)
-	} else {
-		handleErr = se.manager.HandleSocketMessage(decodedMessage, se)
-	}
-
+	var handleErr = se.handler(decodedMessages, se)
 	if handleErr != nil {
 		stack.New().
 			Message("failed handle socket message").

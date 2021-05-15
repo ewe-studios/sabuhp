@@ -7,11 +7,11 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp/managers"
-	"github.com/influx6/sabuhp/transport/hsocks"
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp/managers"
+	"github.com/ewe-studios/sabuhp/sockets/hsocks"
+	"github.com/ewe-studios/sabuhp/utils"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 type MuxConfig struct {
@@ -20,8 +20,8 @@ type MuxConfig struct {
 	NotFound   sabuhp.Handler
 	Manager    *managers.Manager
 	Ctx        context.Context
-	Transposer sabuhp.Transposer
-	Translator sabuhp.Translator
+	Transposer sabuhp.HttpDecoder
+	Translator sabuhp.HttpEncoder
 	Headers    sabuhp.HeaderModifications
 }
 
@@ -226,7 +226,7 @@ func (m *Mux) Match(msg *sabuhp.Message) bool {
 	return handler != nil
 }
 
-func (m *Mux) ServeWithMatchers(msg *sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+func (m *Mux) ServeWithMatchers(msg *sabuhp.Message, tr sabuhp.MessageBus) sabuhp.MessageErr {
 	for _, h := range m.subRoutes {
 		if h.Match(msg) {
 			return h.Handle(msg, tr)
@@ -268,7 +268,7 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var reqPath = r.URL.Path
 	if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
-		// Remove trailing slash and client-permanent rule for redirection,
+		// remove trailing slash and client-permanent rule for redirection,
 		// if configuration allows that and reqPath has an extra slash.
 
 		// update the new reqPath and redirect.

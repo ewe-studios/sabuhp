@@ -11,10 +11,10 @@ import (
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/actions"
-	"github.com/influx6/sabuhp/ochestrator"
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/actions"
+	"github.com/ewe-studios/sabuhp/ochestrator"
+	"github.com/ewe-studios/sabuhp/testingutils"
 
 	redis "github.com/go-redis/redis/v8"
 )
@@ -38,10 +38,10 @@ func main() {
 				var to = job.To
 				var message = job.Msg
 				if sendErr := job.Transport.SendToAll(&sabuhp.Message{
-					ID:       nxid.New(),
+					Id:       nxid.New(),
 					Topic:    message.FromAddr,
 					FromAddr: to,
-					Payload:  []byte("hello world"),
+					Bytes:    []byte("hello world"),
 					Metadata: nil,
 					Params:   nil,
 				}, 5*time.Second); sendErr != nil {

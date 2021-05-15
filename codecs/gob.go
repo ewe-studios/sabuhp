@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 )
@@ -13,7 +13,7 @@ var _ sabuhp.Codec = (*GobCodec)(nil)
 
 type GobCodec struct{}
 
-func (j *GobCodec) Encode(message *sabuhp.Message) ([]byte, error) {
+func (j *GobCodec) Encode(message sabuhp.Message) ([]byte, error) {
 	var buf bytes.Buffer
 	if encodedErr := gob.NewEncoder(&buf).Encode(message); encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
@@ -21,30 +21,10 @@ func (j *GobCodec) Encode(message *sabuhp.Message) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (j *GobCodec) Decode(b []byte) (*sabuhp.Message, error) {
+func (j *GobCodec) Decode(b []byte) (sabuhp.Message, error) {
 	var message sabuhp.Message
 	if jsonErr := gob.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
-		return nil, nerror.WrapOnly(jsonErr)
+		return message, nerror.WrapOnly(jsonErr)
 	}
-	return &message, nil
-}
-
-var _ sabuhp.WrappedCodec = (*WrappedGobCodec)(nil)
-
-type WrappedGobCodec struct{}
-
-func (j *WrappedGobCodec) Encode(message *sabuhp.WrappedPayload) ([]byte, error) {
-	var buf bytes.Buffer
-	if encodedErr := gob.NewEncoder(&buf).Encode(message); encodedErr != nil {
-		return nil, nerror.WrapOnly(encodedErr)
-	}
-	return buf.Bytes(), nil
-}
-
-func (j *WrappedGobCodec) Decode(b []byte) (*sabuhp.WrappedPayload, error) {
-	var message sabuhp.WrappedPayload
-	if jsonErr := gob.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
-		return nil, nerror.WrapOnly(jsonErr)
-	}
-	return &message, nil
+	return message, nil
 }

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influx6/sabuhp/injectors"
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/ewe-studios/sabuhp/injectors"
+	"github.com/ewe-studios/sabuhp/testingutils"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
@@ -59,7 +59,7 @@ func TestNewWorkGroup(t *testing.T) {
 		require.NoError(t, group.HandleMessage(&sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
-			Payload:  textPayload,
+			Bytes:    textPayload,
 			Metadata: nil,
 		}, transport))
 	}
@@ -108,7 +108,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 		require.NoError(t, group.HandleMessage(&sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
-			Payload:  textPayload,
+			Bytes:    textPayload,
 			Metadata: nil,
 		}, transport))
 	}
@@ -159,7 +159,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	var msg = &sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
-		Payload:  textPayload,
+		Bytes:    textPayload,
 		Metadata: nil,
 	}
 	require.NoError(t, group.HandleMessage(msg, transport))
@@ -209,7 +209,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 	require.NoError(t, group.HandleMessage(&sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
-		Payload:  textPayload,
+		Bytes:    textPayload,
 		Metadata: nil,
 	}, transport))
 

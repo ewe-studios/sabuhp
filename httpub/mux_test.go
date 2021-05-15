@@ -3,7 +3,7 @@ package httpub
 import (
 	"testing"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 	"github.com/stretchr/testify/require"
 )
 

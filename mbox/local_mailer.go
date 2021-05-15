@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ewe-studios/sabuhp"
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
 )
 
 // localMailboxChannel houses a channel for a mailbox responder.
@@ -27,7 +27,7 @@ func (mc *localMailboxChannel) Err() error {
 
 func (mc *localMailboxChannel) deliver(msg *sabuhp.Message) {
 	mc.mailbox.deliverTo(mc.callback, msg)
-	if mc.right != nil && msg.Delivery == sabuhp.SendToAll {
+	if mc.right != nil && msg.Type == sabuhp.SendToAll {
 		mc.right.deliver(msg)
 	}
 }
@@ -344,7 +344,7 @@ func (p *LocalMailer) Listen(topic string, callback sabuhp.TransportResponse) sa
 }
 
 func (p *LocalMailer) SendToOne(message *sabuhp.Message, timeout time.Duration) error {
-	message.Delivery = sabuhp.SendToOne
+	message.Type = sabuhp.RequestReply
 
 	// do we have a local handler for the message's target
 	var mailbox = p.getTopic(message.Topic)
@@ -359,7 +359,7 @@ func (p *LocalMailer) SendToOne(message *sabuhp.Message, timeout time.Duration) 
 }
 
 func (p *LocalMailer) SendToAll(message *sabuhp.Message, timeout time.Duration) error {
-	message.Delivery = sabuhp.SendToAll
+	message.Type = sabuhp.SendToAll
 	// do we have a local handler for the message's target
 	var mailbox = p.getTopic(message.Topic)
 	if mailbox != nil {

@@ -8,15 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/influx6/npkg/nthen"
+
 	"github.com/influx6/npkg/njson"
 
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp/utils"
 )
 
 type MessageHandler func(message []byte, socket *SendClient) error
@@ -89,7 +91,13 @@ func NewClient(
 	return client
 }
 
-func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Duration) (*sabuhp.Message, error) {
+func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
+	var ft = msg.Future
+	if msg.Future == nil {
+		ft = nthen.NewFuture()
+	}
+
+	var timeout = msg.Within
 	var header = sabuhp.Header{}
 	for k, v := range msg.Headers {
 		header[k] = v
@@ -109,16 +117,19 @@ func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Dura
 
 	var payload, payloadErr = sc.codec.Encode(msg)
 	if payloadErr != nil {
-		return nil, nerror.WrapOnly(payloadErr)
+		ft.WithError(nerror.WrapOnly(payloadErr))
+		return ft
 	}
 
 	var req, response, err = sc.try(method, header, bytes.NewBuffer(payload), ctx)
 	if err != nil {
-		return nil, nerror.WrapOnly(err)
+		ft.WithError(err)
+		return ft
 	}
 
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return nil, nerror.New("failed to request [Status Code: %d]", response.StatusCode)
+		ft.WithError(nerror.New("failed to request [Status Code: %d]", response.StatusCode))
+		return ft
 	}
 
 	njson.Log(sc.logger).New().
@@ -135,6 +146,7 @@ func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Dura
 	var responseBody = bytes.NewBuffer(make([]byte, 0, 512))
 	if _, readErr := io.Copy(responseBody, response.Body); readErr != nil {
 		var wrappedErr = nerror.WrapOnly(readErr)
+		ft.WithError(wrappedErr)
 		njson.Log(sc.logger).New().
 			LError().
 			Message("failed to read response").
@@ -146,6 +158,7 @@ func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Dura
 			Int("response_status_code", response.StatusCode).
 			Error("error", wrappedErr).
 			End()
+		return ft
 	}
 
 	if closeErr := response.Body.Close(); closeErr != nil {
@@ -154,41 +167,41 @@ func (sc *SendClient) Send(method string, msg *sabuhp.Message, timeout time.Dura
 			Message("failed to close response body").
 			String("error", nerror.WrapOnly(err).Error()).
 			End()
+
+		ft.WithError(closeErr)
+		return ft
 	}
 
 	var contentType = response.Header.Get("Content-Type")
 	var contentTypeLower = strings.ToLower(contentType)
 	if !strings.Contains(contentTypeLower, sabuhp.MessageContentType) {
-		return &sabuhp.Message{
-			Topic:    req.URL.Path,
-			ID:       nxid.New(),
-			Delivery: sabuhp.SendToAll,
-			MessageMeta: sabuhp.MessageMeta{
-				ContentType:     contentType,
-				Path:            req.URL.Path,
-				Query:           req.URL.Query(),
-				Form:            req.Form,
-				Headers:         sabuhp.Header(response.Header.Clone()),
-				Cookies:         sabuhp.ReadCookies(sabuhp.Header(response.Header), ""),
-				MultipartReader: nil,
-			},
-			Payload:             responseBody.Bytes(),
-			Metadata:            map[string]string{},
-			Params:              map[string]string{},
-			LocalPayload:        nil,
-			OverridingTransport: nil,
-		}, nil
+		ft.WithValue(sabuhp.Message{
+			Topic:       req.URL.Path,
+			Id:          nxid.New(),
+			ContentType: contentType,
+			Path:        req.URL.Path,
+			Query:       req.URL.Query(),
+			Form:        req.Form,
+			Headers:     sabuhp.Header(response.Header.Clone()),
+			Cookies:     sabuhp.ReadCookies(sabuhp.Header(response.Header), ""),
+			Bytes:       responseBody.Bytes(),
+			Metadata:    map[string]string{},
+			Params:      map[string]string{},
+		})
+		return ft
 	}
 
 	var responseMessage, responseMsgErr = sc.codec.Decode(responseBody.Bytes())
 	if responseMsgErr != nil {
-		return nil, nerror.WrapOnly(responseMsgErr)
+		ft.WithError(nerror.WrapOnly(responseMsgErr))
+		return ft
 	}
-	if len(responseMessage.MessageMeta.Path) == 0 {
-		responseMessage.MessageMeta.Path = req.URL.Path
+	if len(responseMessage.Path) == 0 {
+		responseMessage.Path = req.URL.Path
 	}
 
-	return responseMessage, nil
+	ft.WithValue(responseMessage)
+	return ft
 }
 
 func (sc *SendClient) try(method string, header sabuhp.Header, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {

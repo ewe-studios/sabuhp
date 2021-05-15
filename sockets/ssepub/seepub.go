@@ -11,18 +11,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/influx6/npkg/nthen"
 	"github.com/influx6/npkg/nunsafe"
 
+	"github.com/ewe-studios/sabuhp/utils"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp/utils"
 
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp/managers"
+	"github.com/ewe-studios/sabuhp/managers"
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 const (
@@ -305,7 +306,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		return
 	}
 
-	if deliveryErr := existingSocket.SendRead(wrappedPayload, 0); deliveryErr != nil {
+	if deliveryErr := existingSocket.Publish(wrappedPayload, 0); deliveryErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		if err := utils.CreateError(
 			w,
@@ -439,64 +440,36 @@ func (se *SSESocket) LocalAddr() net.Addr {
 }
 
 type sseSend struct {
-	Data   []byte
-	Meta   sabuhp.MessageMeta
-	writer *sabuhp.SocketWriterTo
+	Message *sabuhp.Message
+	Future  *nthen.Future
 }
 
-func (se *SSESocket) Send(msg []byte, meta sabuhp.MessageMeta, timeout time.Duration) error {
-	var timeoutChan <-chan time.Time
-	if timeout > 0 {
-		timeoutChan = time.After(timeout)
-	}
+func (se *SSESocket) Send(msg *sabuhp.Message) *nthen.Future {
+	var ft = nthen.NewFuture()
 
+	var timeoutChan <-chan time.Time
+	if msg.Within > 0 {
+		timeoutChan = time.After(msg.Within)
+	}
 	var reqCtx = se.req.Context()
 	select {
 	case se.sentMsgs <- sseSend{
-		Data:   msg,
-		writer: nil,
-		Meta:   meta,
+		Message: msg,
+		Future:  ft,
 	}:
-		return nil
+		ft.WithValue(nil)
 	case <-timeoutChan: // nil channel will be ignored
-		return nerror.New("message delivery timeout")
+		ft.WithError(nerror.New("message delivery timeout"))
 	case <-reqCtx.Done():
-		return nerror.WrapOnly(reqCtx.Err())
+		ft.WithError(nerror.WrapOnly(reqCtx.Err()))
 	case <-se.ctx.Done():
-		return nerror.WrapOnly(se.ctx.Err())
+		ft.WithError(nerror.WrapOnly(se.ctx.Err()))
 	}
+
+	return ft
 }
 
-func (se *SSESocket) SendWriter(msgWriter io.WriterTo, meta sabuhp.MessageMeta, timeout time.Duration) sabuhp.ErrorWaiter {
-	var timeoutChan <-chan time.Time
-	if timeout > 0 {
-		timeoutChan = time.After(timeout)
-	}
-
-	var socketWriter = sabuhp.NewSocketWriterTo(msgWriter)
-	select {
-	case <-se.req.Context().Done():
-		socketWriter.Abort(se.req.Context().Err())
-		se.canceler()
-		return socketWriter
-	case <-timeoutChan: // nil channel will be ignored
-		socketWriter.Abort(nerror.New("message delivery timeout"))
-		se.canceler()
-		return socketWriter
-	case <-se.ctx.Done():
-		socketWriter.Abort(nerror.New("not receiving anymore messages"))
-		se.canceler()
-		return socketWriter
-	case se.sentMsgs <- sseSend{
-		Data:   nil,
-		writer: socketWriter,
-		Meta:   meta,
-	}:
-		return socketWriter
-	}
-}
-
-func (se *SSESocket) SendRead(msg *sabuhp.Message, timeout time.Duration) error {
+func (se *SSESocket) Publish(msg *sabuhp.Message, timeout time.Duration) error {
 	var timeoutChan <-chan time.Time
 	if timeout > 0 {
 		timeoutChan = time.After(timeout)
@@ -602,22 +575,8 @@ doLoop:
 		case msg := <-se.sentMsgs:
 			atomic.AddInt64(&se.sent, 1)
 
-			if msg.writer != nil {
-				if err := se.sendWriterTo(msg.writer, msg.Meta); err != nil {
-					stack.New().
-						LError().
-						Message("write failed").
-						String("error", err.Error()).
-						End()
-				}
-
-				// flush content into response writer.
-				flusher.Flush()
-
-				continue
-			}
-
-			if err := se.sendWrite(msg.Data, msg.Meta); err != nil {
+			if err := se.sendWrite(msg.Message); err != nil {
+				msg.Future.WithError(err)
 				stack.New().
 					LError().
 					Message("write failed").
@@ -627,18 +586,25 @@ doLoop:
 
 			// flush content into response writer.
 			flusher.Flush()
+
+			msg.Future.WithValue(nil)
 		}
 	}
 }
 
-func (se *SSESocket) sendWrite(msg []byte, meta sabuhp.MessageMeta) error {
+func (se *SSESocket) sendWrite(msg *sabuhp.Message) error {
+	var encodedMessage, encodeErr = se.codec.Encode(msg)
+	if encodeErr != nil {
+		return nerror.WrapOnly(encodeErr)
+	}
+
 	var builder strings.Builder
 	builder.Reset()
 	builder.WriteString("event: ")
-	builder.WriteString(meta.ContentType)
+	builder.WriteString(msg.Meta.ContentType)
 	builder.WriteString("\n")
 	builder.WriteString("data: ")
-	builder.Write(msg)
+	builder.Write(encodedMessage)
 	builder.WriteString("\n\n")
 
 	var stack = njson.Log(se.logger)
@@ -653,54 +619,6 @@ func (se *SSESocket) sendWrite(msg []byte, meta sabuhp.MessageMeta) error {
 		stack.New().
 			LError().
 			Message("failed to write data to http response writer").
-			String("error", nerror.WrapOnly(writeErr).Error()).
-			Int("written", sentCount).
-			End()
-		return writeErr
-	}
-	return nil
-}
-
-func (se *SSESocket) sendWriterTo(writer *sabuhp.SocketWriterTo, meta sabuhp.MessageMeta) error {
-	var builder strings.Builder
-	builder.Reset()
-	builder.WriteString("event: ")
-	builder.WriteString(meta.ContentType)
-	builder.WriteString("\n")
-	builder.WriteString("data: ")
-
-	var stack = njson.Log(se.logger)
-
-	stack.New().
-		LInfo().
-		Message("sending new data into writer").
-		String("data", builder.String()).
-		End()
-
-	if sentCount, writeErr := se.res.Write(nunsafe.String2Bytes(builder.String())); writeErr != nil {
-		stack.New().
-			LError().
-			Message("failed to write data to http response writer").
-			String("error", nerror.WrapOnly(writeErr).Error()).
-			Int("written", sentCount).
-			End()
-		return writeErr
-	}
-
-	if sentCount, writeErr := writer.WriteTo(se.res); writeErr != nil {
-		stack.New().
-			LError().
-			Message("failed to write data from WriterTo to http response writer").
-			String("error", nerror.WrapOnly(writeErr).Error()).
-			Int64("written", sentCount).
-			End()
-		return writeErr
-	}
-
-	if sentCount, writeErr := se.res.Write(doubleLine); writeErr != nil {
-		stack.New().
-			LError().
-			Message("failed to write data ending newlines to response writer").
 			String("error", nerror.WrapOnly(writeErr).Error()).
 			Int("written", sentCount).
 			End()

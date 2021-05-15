@@ -1,34 +1,35 @@
 package sabuhp
 
 import (
-	"io"
+	"github.com/influx6/npkg"
+	"github.com/influx6/npkg/nerror"
+	"github.com/influx6/npkg/njson"
+	"github.com/influx6/npkg/nthen"
+	"github.com/influx6/npkg/nxid"
 	"net"
 	"sync"
-	"time"
-
-	"github.com/influx6/npkg/nerror"
-
-	"github.com/influx6/npkg"
-	"github.com/influx6/npkg/nxid"
 )
 
-// MessageHandler defines the function contract a manager uses
+// SocketHandler defines the function contract to be called for a socket instace.
+type SocketHandler func(from Socket)
+
+// SocketByteHandler defines the function contract a manager uses
 // to handle a message.
 //
 // Be aware that returning an error from the handler to the Gorilla socket
 // will cause the immediate closure of that socket and ending communication
 // with the client and the error will be logged. So unless your intention is to
 // end the connection, handle it yourself.
-type MessageHandler func(b []byte, from Socket) error
+type SocketByteHandler func(b []byte, from Socket) error
 
-// SocketHandler defines the function contract a sabuhp.Socket uses
+// SocketMessageHandler defines the function contract a sabuhp.Socket uses
 // to handle a message.
 //
 // Be aware that returning an error from the handler to the Gorilla sabuhp.Socket
 // will cause the immediate closure of that socket and ending communication
 // with the client and the error will be logged. So unless your intention is to
 // end the connection, handle it yourself.
-type SocketHandler func(b *Message, from Socket) error
+type SocketMessageHandler func(b []Message, from Socket) error
 
 type SocketStat struct {
 	Addr       net.Addr
@@ -50,74 +51,312 @@ func (g SocketStat) EncodeObject(encoder npkg.ObjectEncoder) {
 	encoder.String("remote_addr_network", g.RemoteAddr.Network())
 }
 
-type SocketWriterTo struct {
-	waiter   *sync.WaitGroup
-	target   io.WriterTo
-	ml       sync.Mutex
-	writing  bool
-	abortErr error
+// Socket defines an underline connection handler which handles
+// delivery of messages to the underline stream.
+type Socket interface {
+	ID() nxid.ID
+	Send(...Message)
+	Stat() SocketStat
+	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	Listen(SocketMessageHandler)
 }
 
-func NewSocketWriterTo(w io.WriterTo) *SocketWriterTo {
-	var waiter sync.WaitGroup
-	waiter.Add(1)
-	return &SocketWriterTo{
-		waiter:   &waiter,
-		target:   w,
-		writing:  false,
-		abortErr: nil,
+type SocketService interface {
+	SocketOpened(Socket)
+	SocketClosed(Socket)
+}
+
+type SocketServer interface {
+	Stream(SocketService)
+}
+
+type StreamBus struct {
+	Logger Logger
+	Bus MessageBus
+	ml sync.RWMutex
+	channels map[nxid.ID][]Channel
+}
+
+func NewStreamBus(logger Logger, bus MessageBus) *StreamBus {
+	return &StreamBus{Logger: logger, Bus: bus, channels: map[nxid.ID][]Channel{},}
+}
+
+// WithBus returns the instance of a StreamBus which will be connected to the provided SocketServer
+// and handle delivery of messages to a message bus and subscription/unscriptions as well.
+func WithBus(logger Logger, socketServer SocketServer, bus MessageBus) *StreamBus {
+	var stream = NewStreamBus(logger, bus)
+	socketServer.Stream(stream)
+	return stream
+}
+
+func (st *StreamBus) SocketClosed(socket Socket){
+	st.ml.RLock()
+	defer st.ml.RUnlock()
+	if channels, hasChannel := st.channels[socket.ID()]; hasChannel {
+		for _, channel := range channels {
+			channel.Close()
+		}
 	}
 }
 
-func (se *SocketWriterTo) Wait() error {
-	se.waiter.Wait()
-	se.ml.Lock()
-	if se.abortErr != nil {
-		se.ml.Unlock()
-		return se.abortErr
+func (st *StreamBus) SocketOpened(socket Socket){
+	socket.Listen(func(messages []Message, from Socket) error {
+		var subs, unsubs, datas = SplitMessagesToGroups(messages)
+
+		for _, message := range unsubs {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
+					event.Int("_level", int(npkg.ERROR))
+					event.String("subscription_topic", message.SubscribeTo)
+					event.String("subscription_group", message.SubscribeGroup)
+					event.String("socket_id", from.ID().String())
+					event.Object("socket_stat", from.Stat())
+				}))
+			}
+			_ = st.SocketUnsubscribe(message, from)
+		}
+
+		for _, message := range subs {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
+					event.Int("_level", int(npkg.ERROR))
+					event.String("subscription_topic", message.SubscribeTo)
+					event.String("subscription_group", message.SubscribeGroup)
+					event.String("socket_id", from.ID().String())
+					event.Object("socket_stat", from.Stat())
+				}))
+			}
+			_ = st.SocketSubscribe(message, from)
+		}
+
+		if err := st.SocketBusSend(datas, from); err != nil {
+			st.Logger.Log(njson.MJSON("failed to handle message from from", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
+				event.Error("error", err)
+				event.String("socket_id", from.ID().String())
+				event.Object("socket_stat", from.Stat())
+			}))
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (st *StreamBus) SocketSubscribe(b Message, socket Socket) MessageErr{
+	var channel = st.Bus.Listen(b.SubscribeTo, b.SubscribeGroup,TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+		var ft = message.Future
+		if message.Future == nil {
+			ft = nthen.NewFuture()
+			message.Future = ft
+		}
+
+		socket.Send(message)
+		if sendErr := ft.Err(); sendErr != nil {
+			st.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
+				event.String("error", sendErr.Error())
+				event.String("socket_id", socket.ID().String())
+				event.Object("socket_stat", socket.Stat())
+			}))
+
+			var unwrappedErr = nerror.UnwrapDeep(sendErr)
+			if unwrappedSendErr, ok := unwrappedErr.(MessageErr); ok {
+				return unwrappedSendErr
+			}
+			return WrapErr(sendErr, false)
+		}
+		return nil
+	}))
+
+	st.ml.Lock()
+	var socketChannels, hasSocketChannels = st.channels[socket.ID()]
+	if !hasSocketChannels {
+		socketChannels = append(socketChannels, channel)
+	}
+	st.channels[socket.ID()] = socketChannels
+	st.ml.Unlock()
+
+	return nil
+}
+
+func (st *StreamBus) SocketUnsubscribe(b Message, socket Socket) MessageErr{
+	st.ml.RLock()
+	defer st.ml.RUnlock()
+	if channels, hasChannel := st.channels[socket.ID()]; hasChannel {
+		for _, channel := range channels {
+			if channel.Topic() == b.SubscribeTo && channel.Group() == b.SubscribeGroup {
+				channel.Close()
+			}
+		}
 	}
 	return nil
 }
 
-func (se *SocketWriterTo) WriteTo(w io.Writer) (int64, error) {
-	se.ml.Lock()
-	if se.abortErr != nil {
-		se.ml.Unlock()
-		return 0, nerror.New("Aborted")
+func (st *StreamBus) SocketBusSend(b []Message, _ Socket) MessageErr{
+	var fts = make([]*nthen.Future, 0, len(b))
+	for index, mb := range b {
+		var mbPointer = &mb
+		if mbPointer.Future == nil {
+			mbPointer.Future = nthen.NewFuture()
+		}
+		fts[index] = mb.Future
 	}
-	se.writing = true
-	se.ml.Unlock()
 
-	var written, writeErr = se.target.WriteTo(w)
-	se.waiter.Done()
-	if writeErr != nil {
-		se.ml.Lock()
-		se.abortErr = writeErr
-		se.ml.Unlock()
-		return written, nerror.WrapOnly(writeErr)
-	}
-	return written, nil
+	st.Bus.Send(b...)
+	return WrapErr(nthen.WaitFor(fts...).Err(), false)
 }
 
-func (se *SocketWriterTo) Abort(err error) {
-	se.ml.Lock()
-	if !se.writing {
-		se.writing = false
-		se.abortErr = err
+
+type StreamRelay struct {
+	Logger Logger
+	Relay *PbRelay
+	Bus MessageBus
+}
+
+func NewStreamRelay(logger Logger, bus MessageBus, relay *PbRelay) *StreamRelay {
+	return &StreamRelay{Logger: logger, Bus: bus, Relay: relay}
+}
+
+// WithRelay returns the instance of a StreamRelay which will be connected to the provided SocketServer
+// and handle delivery of messages to a message bus and subscription to a target relay.
+func WithRelay(logger Logger, socketServer SocketServer, bus MessageBus, relay *PbRelay) *StreamRelay {
+	var stream = NewStreamRelay(logger, bus, relay)
+	socketServer.Stream(stream)
+	return stream
+}
+
+func (st *StreamRelay) SocketClosed(socket Socket){
+	st.Relay.UnlistenAllWithId(socket.ID())
+}
+
+func (st *StreamRelay) SocketOpened(socket Socket){
+	socket.Listen(func(messages []Message, from Socket) error {
+		var subs, unsubs, datas = SplitMessagesToGroups(messages)
+
+		for _, message := range unsubs {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
+					event.Int("_level", int(npkg.ERROR))
+					event.String("subscription_topic", message.SubscribeTo)
+					event.String("subscription_group", message.SubscribeGroup)
+					event.String("socket_id", from.ID().String())
+					event.Object("socket_stat", from.Stat())
+				}))
+			}
+			_ = st.SocketUnsubscribe(message, from)
+		}
+
+		for _, message := range subs {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
+					event.Int("_level", int(npkg.ERROR))
+					event.String("subscription_topic", message.SubscribeTo)
+					event.String("subscription_group", message.SubscribeGroup)
+					event.String("socket_id", from.ID().String())
+					event.Object("socket_stat", from.Stat())
+				}))
+			}
+			_ = st.SocketSubscribe(message, from)
+		}
+
+		if err := st.SocketBusSend(datas, from); err != nil {
+			st.Logger.Log(njson.MJSON("failed to handle message from from", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
+				event.Error("error", err)
+				event.String("socket_id", from.ID().String())
+				event.Object("socket_stat", from.Stat())
+			}))
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (st *StreamRelay) SocketSubscribe(b Message, socket Socket) MessageErr{
+	var group = st.Relay.Group(b.SubscribeTo, b.SubscribeGroup)
+	var channel = group.Listen(TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+		var ft = message.Future
+		if message.Future == nil {
+			ft = nthen.NewFuture()
+			message.Future = ft
+		}
+
+		socket.Send(message)
+		if sendErr := ft.Err(); sendErr != nil {
+			st.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
+				event.String("error", sendErr.Error())
+				event.String("socket_id", socket.ID().String())
+				event.Object("socket_stat", socket.Stat())
+			}))
+
+			var unwrappedErr = nerror.UnwrapDeep(sendErr)
+			if unwrappedSendErr, ok := unwrappedErr.(MessageErr); ok {
+				return unwrappedSendErr
+			}
+			return WrapErr(sendErr, false)
+		}
+		return nil
+	}))
+	if b.Future != nil {
+		b.Future.WithValue(channel)
 	}
-	se.ml.Unlock()
-	se.waiter.Done()
+	return nil
 }
 
-type ErrorWaiter interface {
-	Wait() error
+func (st *StreamRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr{
+	var group = st.Relay.Group(b.SubscribeTo, b.SubscribeGroup)
+	group.Remove(socket.ID())
+	if b.Future != nil {
+		b.Future.WithValue(nil)
+	}
+	return nil
 }
 
-type Socket interface {
-	ID() nxid.ID
-	Stat() SocketStat
-	RemoteAddr() net.Addr
-	LocalAddr() net.Addr
-	Send([]byte, MessageMeta, time.Duration) error
-	SendWriter(io.WriterTo, MessageMeta, time.Duration) ErrorWaiter
+func (st *StreamRelay) SocketBusSend(b []Message, _ Socket) MessageErr{
+	var fts = make([]*nthen.Future, 0, len(b))
+	for index, mb := range b {
+		var mbPointer = &mb
+		if mbPointer.Future == nil {
+			mbPointer.Future = nthen.NewFuture()
+		}
+		fts[index] = mb.Future
+	}
+
+	st.Bus.Send(b...)
+	return WrapErr(nthen.WaitFor(fts...).Err(), false)
+}
+
+type SocketServers struct {
+	sm sync.RWMutex
+	streams []SocketService
+}
+
+func NewSocketServers() *SocketServers {
+	return &SocketServers{}
+}
+
+func (htp *SocketServers) SocketClosed(socket Socket) {
+	htp.sm.RLock(   )
+	defer htp.sm.RUnlock()
+	for _, stream := range htp.streams {
+		stream.SocketOpened(socket)
+	}
+}
+
+func (htp *SocketServers) SocketOpened(socket Socket) {
+	htp.sm.RLock()
+	defer htp.sm.RUnlock()
+	for _, stream := range htp.streams {
+		stream.SocketClosed(socket)
+	}
+}
+
+func (htp *SocketServers) Stream(server SocketService) {
+	htp.sm.Lock()
+	defer htp.sm.Unlock()
+	htp.streams = append(htp.streams, server)
 }

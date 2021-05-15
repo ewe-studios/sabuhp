@@ -12,7 +12,7 @@ import (
 
 	"github.com/influx6/npkg"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/njson"
 )

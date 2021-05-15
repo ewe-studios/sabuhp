@@ -9,7 +9,7 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/Ewe-Studios/websocket"
+	"github.com/ewe-studios/websocket"
 )
 
 type DialerEndpoint struct {

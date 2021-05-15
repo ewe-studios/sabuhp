@@ -1,6 +1,6 @@
 # SabuHP
 
-[![GoDoc](https://img.shields.io/badge/api-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/influx6/sabuhp)
+[![GoDoc](https://img.shields.io/badge/api-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/ewe-studios/sabuhp)
 
 Power your backend with a hybrid service layer communicating across a message bus regardless of protocol.
 
@@ -19,7 +19,7 @@ SabuHP supports the following protocols for communicating with the service serve
 ## Getting
 
 ```
-go get -u github.com/influx6/sabuhp
+go get -u github.com/ewe-studios/sabuhp
 ```
 
 ## Using
@@ -40,10 +40,10 @@ import (
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nxid"
 
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/ochestrator"
-	"github.com/influx6/sabuhp/slaves"
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/ochestrator"
+	"github.com/ewe-studios/sabuhp/slaves"
+	"github.com/ewe-studios/sabuhp/testingutils"
 )
 
 var (

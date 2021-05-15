@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/codecs"
 	"github.com/influx6/npkg/nerror"
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/codecs"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/Ewe-Studios/websocket"
-	"github.com/influx6/sabuhp/testingutils"
+	"github.com/ewe-studios/sabuhp/testingutils"
+	"github.com/ewe-studios/websocket"
 )
 
 var codec = &codecs.JsonCodec{}
@@ -33,7 +33,7 @@ func TestGorillaClient(t *testing.T) {
 		Logger: logger,
 		Codec:  codec,
 		Handler: func(b *sabuhp.Message, from sabuhp.Socket) error {
-			return from.Send(append([]byte("hello "), b.Payload...), sabuhp.MessageMeta{}, 0)
+			return from.Send(append([]byte("hello "), b.Bytes...), sabuhp.MessageMeta{}, 0)
 		},
 	})
 
@@ -80,7 +80,7 @@ func TestGorillaClient(t *testing.T) {
 	require.NoError(t, client.Send([]byte("alex"), sabuhp.MessageMeta{}, 0))
 
 	var serverResponse = <-message
-	require.Equal(t, []byte("hello alex"), serverResponse.Payload)
+	require.Equal(t, []byte("hello alex"), serverResponse.Bytes)
 
 	controlStopFunc()
 
@@ -96,7 +96,7 @@ func TestGorillaClientReconnect(t *testing.T) {
 		Codec:  codec,
 		Logger: logger,
 		Handler: func(b *sabuhp.Message, from sabuhp.Socket) error {
-			return from.Send(append([]byte("hello "), b.Payload...), sabuhp.MessageMeta{}, 0)
+			return from.Send(append([]byte("hello "), b.Bytes...), sabuhp.MessageMeta{}, 0)
 		},
 	})
 
@@ -148,7 +148,7 @@ func TestGorillaClientReconnect(t *testing.T) {
 	require.NoError(t, client.Send([]byte("alex"), sabuhp.MessageMeta{}, 0))
 
 	var serverResponse = <-message
-	require.Equal(t, []byte("hello alex"), serverResponse.Payload)
+	require.Equal(t, []byte("hello alex"), serverResponse.Bytes)
 
 	// close current connection
 	_ = clientConn.Close()
@@ -158,7 +158,7 @@ func TestGorillaClientReconnect(t *testing.T) {
 	require.NoError(t, client.Send([]byte("alex"), sabuhp.MessageMeta{}, 0))
 
 	var serverResponse2 = <-message
-	require.Equal(t, []byte("hello alex"), serverResponse2.Payload)
+	require.Equal(t, []byte("hello alex"), serverResponse2.Bytes)
 
 	controlStopFunc()
 
@@ -174,7 +174,7 @@ func TestGorillaHub_WithMessage(t *testing.T) {
 		Codec:  codec,
 		Logger: logger,
 		Handler: func(b *sabuhp.Message, from sabuhp.Socket) error {
-			var topicMessage, topicErr = testingutils.EncodedMsg(codec, "hello", string(append([]byte("hello "), b.Payload...)), "me")
+			var topicMessage, topicErr = testingutils.EncodedMsg(codec, "hello", string(append([]byte("hello "), b.Bytes...)), "me")
 			require.NoError(t, topicErr)
 			return from.Send(topicMessage, sabuhp.MessageMeta{ContentType: sabuhp.MessageContentType}, 0)
 		},
@@ -222,7 +222,7 @@ func TestGorillaHub(t *testing.T) {
 		Codec:  codec,
 		Logger: logger,
 		Handler: func(b *sabuhp.Message, from sabuhp.Socket) error {
-			return from.Send(append([]byte("hello "), b.Payload...), sabuhp.MessageMeta{}, 0)
+			return from.Send(append([]byte("hello "), b.Bytes...), sabuhp.MessageMeta{}, 0)
 		},
 	})
 
@@ -309,7 +309,7 @@ func TestGorillaHub_StatAfterClosure(t *testing.T) {
 		Codec:  codec,
 		Handler: func(b *sabuhp.Message, from sabuhp.Socket) error {
 			defer close(sent)
-			return from.Send(append([]byte("hello "), b.Payload...), sabuhp.MessageMeta{}, 0)
+			return from.Send(append([]byte("hello "), b.Bytes...), sabuhp.MessageMeta{}, 0)
 		},
 	})
 

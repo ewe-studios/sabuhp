@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ewe-studios/sabuhp"
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/njson"
-	"github.com/influx6/sabuhp"
 )
 
 // mailboxChannel houses a channel for a mailbox responder.
@@ -79,7 +79,7 @@ type Mailbox struct {
 	logger   sabuhp.Logger
 	ctx      context.Context
 
-	transport        sabuhp.Transport
+	transport        sabuhp.MessageBus
 	transportChannel sabuhp.Channel
 
 	messages    chan *sabuhp.Message
@@ -96,7 +96,7 @@ func NewMailbox(
 	topic string,
 	logger sabuhp.Logger,
 	bufferSize int,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) *Mailbox {
 	var box = &Mailbox{
 		topic:     topic,
@@ -245,7 +245,7 @@ func (ps *Mailbox) listen() {
 		ps.topic,
 		sabuhp.TransportResponseFunc(func(
 			data *sabuhp.Message,
-			t sabuhp.Transport,
+			t sabuhp.MessageBus,
 		) sabuhp.MessageErr {
 			if deliveryErr := ps.Deliver(data); deliveryErr != nil {
 				ps.logger.Log(njson.MJSON("failed to Deliver decoded message to mailbox", func(event npkg.Encoder) {
@@ -296,7 +296,7 @@ type Mailer struct {
 	logger        sabuhp.Logger
 	canceler      context.CancelFunc
 	ctx           context.Context
-	transport     sabuhp.Transport
+	transport     sabuhp.MessageBus
 	tml           sync.RWMutex
 	topicMappings map[string]*Mailbox
 }
@@ -305,7 +305,7 @@ func NewMailer(
 	ctx context.Context,
 	mailboxBuffer int,
 	logger sabuhp.Logger,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) *Mailer {
 	var mailer = &Mailer{
 		logger:        logger,

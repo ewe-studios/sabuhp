@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/Ewe-Studios/websocket"
+	"github.com/ewe-studios/websocket"
 )
 
 var (

@@ -19,12 +19,12 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/Ewe-Studios/websocket"
+	"github.com/ewe-studios/websocket"
 
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/managers"
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/managers"
 
-	"github.com/influx6/sabuhp/utils"
+	"github.com/ewe-studios/sabuhp/utils"
 )
 
 const (
@@ -217,7 +217,7 @@ type ConfigCreator func(config SocketConfig) SocketConfig
 type HubConfig struct {
 	Ctx           context.Context
 	Logger        sabuhp.Logger
-	Handler       sabuhp.SocketHandler
+	Handler       sabuhp.SocketMessageHandler
 	OnClosure     managers.SocketNotification
 	OnOpen        managers.SocketNotification
 	Codec         sabuhp.Codec
@@ -461,14 +461,14 @@ type SocketConfig struct {
 	RetryFn  sabuhp.RetryFunc
 	Endpoint Endpoint
 
-	// MessageHandler defines the function contract a GorillaSocket uses
+	// SocketByteHandler defines the function contract a GorillaSocket uses
 	// to handle a message.
 	//
 	// Be aware that returning an error from the handler to the Gorilla Socket
 	// will cause the immediate closure of that socket and ending communication
 	// with the server. So unless your intention is to
 	// end the connection, handle the error yourself.
-	Handler sabuhp.SocketHandler
+	Handler sabuhp.SocketMessageHandler
 }
 
 func (s *SocketConfig) clientConnect(ctx context.Context) error {
@@ -879,9 +879,9 @@ func (g *GorillaSocket) manageReads() {
 		// get type marker
 		if !bytes.HasPrefix(message, sabuMessageWSHeader) && !bytes.HasPrefix(message, anyMessageWSHeader) {
 			var payload = &sabuhp.Message{
-				Topic:    info.Path,
-				ID:       nxid.New(),
-				Delivery: sabuhp.SendToAll,
+				Topic: info.Path,
+				Id:    nxid.New(),
+				Type:  sabuhp.SendToAll,
 				MessageMeta: sabuhp.MessageMeta{
 					ContentType:     "any",
 					Path:            info.Path,
@@ -891,7 +891,7 @@ func (g *GorillaSocket) manageReads() {
 					Cookies:         sabuhp.ReadCookies(info.Headers, ""),
 					MultipartReader: nil,
 				},
-				Payload:             message,
+				Bytes:               message,
 				Metadata:            map[string]string{},
 				Params:              map[string]string{},
 				LocalPayload:        nil,
@@ -906,9 +906,9 @@ func (g *GorillaSocket) manageReads() {
 		if bytes.HasPrefix(message, anyMessageWSHeader) {
 			var rest = bytes.TrimPrefix(message, anyMessageWSHeader)
 			var payload = &sabuhp.Message{
-				Topic:    info.Path,
-				ID:       nxid.New(),
-				Delivery: sabuhp.SendToAll,
+				Topic: info.Path,
+				Id:    nxid.New(),
+				Type:  sabuhp.SendToAll,
 				MessageMeta: sabuhp.MessageMeta{
 					ContentType:     "any",
 					Path:            info.Path,
@@ -918,7 +918,7 @@ func (g *GorillaSocket) manageReads() {
 					Cookies:         sabuhp.ReadCookies(info.Headers, ""),
 					MultipartReader: nil,
 				},
-				Payload:             rest,
+				Bytes:               rest,
 				Metadata:            map[string]string{},
 				Params:              map[string]string{},
 				LocalPayload:        nil,

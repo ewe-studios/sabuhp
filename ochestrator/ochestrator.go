@@ -15,19 +15,19 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/Ewe-Studios/websocket"
+	"github.com/ewe-studios/websocket"
 
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/actions"
-	"github.com/influx6/sabuhp/codecs"
-	"github.com/influx6/sabuhp/injectors"
-	"github.com/influx6/sabuhp/managers"
-	"github.com/influx6/sabuhp/mbox"
-	"github.com/influx6/sabuhp/mbus/redispub"
-	"github.com/influx6/sabuhp/radar"
-	"github.com/influx6/sabuhp/transport/gorillapub"
-	"github.com/influx6/sabuhp/transport/httpub/serverpub"
-	"github.com/influx6/sabuhp/transport/ssepub"
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/actions"
+	"github.com/ewe-studios/sabuhp/codecs"
+	"github.com/ewe-studios/sabuhp/injectors"
+	"github.com/ewe-studios/sabuhp/managers"
+	"github.com/ewe-studios/sabuhp/mbox"
+	"github.com/ewe-studios/sabuhp/mbus/redispub"
+	"github.com/ewe-studios/sabuhp/radar"
+	"github.com/ewe-studios/sabuhp/sockets/gorillapub"
+	"github.com/ewe-studios/sabuhp/sockets/httpub/serverpub"
+	"github.com/ewe-studios/sabuhp/sockets/ssepub"
 )
 
 const (
@@ -87,13 +87,13 @@ type TranslatorCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-) (sabuhp.Translator, error)
+) (sabuhp.HttpEncoder, error)
 
 func DefaultTranslator(
 	_ context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-) (sabuhp.Translator, error) {
+) (sabuhp.HttpEncoder, error) {
 	return sabuhp.NewCodecTranslator(codec, logger), nil
 }
 
@@ -102,14 +102,14 @@ type TransposerCreator func(
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
 	maxSize int64,
-) (sabuhp.Transposer, error)
+) (sabuhp.HttpDecoder, error)
 
 func DefaultTransposer(
 	_ context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
 	maxSize int64,
-) (sabuhp.Transposer, error) {
+) (sabuhp.HttpDecoder, error) {
 	return sabuhp.NewCodecTransposer(codec, logger, DefaultMaxSize), nil
 }
 
@@ -117,13 +117,13 @@ type TransportCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-) (sabuhp.Transport, error)
+) (sabuhp.MessageBus, error)
 
 func DefaultLocalMailerTransport(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	_ sabuhp.Codec,
-) (sabuhp.Transport, error) {
+) (sabuhp.MessageBus, error) {
 	return mbox.NewLocalMailer(
 		ctx,
 		100,
@@ -136,8 +136,8 @@ func DefaultRedisTransportWithOptions(
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
 	redisOption redis.Options,
-) (sabuhp.Transport, error) {
-	var redisTransport, redisTransportErr = redispub.NewRedisPubSub(redispub.PubSubConfig{
+) (sabuhp.MessageBus, error) {
+	var redisTransport, redisTransportErr = redispub.NewMessageRail(redispub.Config{
 		Logger: logger,
 		Ctx:    ctx,
 		Codec:  codec,
@@ -155,7 +155,7 @@ func RedisTransportWithOptions(config redis.Options) TransportCreator {
 		ctx context.Context,
 		logger sabuhp.Logger,
 		codec sabuhp.Codec,
-	) (sabuhp.Transport, error) {
+	) (sabuhp.MessageBus, error) {
 		return DefaultRedisTransportWithOptions(ctx, logger, codec, config)
 	}
 }
@@ -164,7 +164,7 @@ func DefaultRedisTransport(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-) (sabuhp.Transport, error) {
+) (sabuhp.MessageBus, error) {
 	return DefaultRedisTransportWithOptions(ctx, logger, codec, redis.Options{})
 }
 
@@ -172,16 +172,16 @@ type RouterCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	manager *managers.Manager,
-	transposer sabuhp.Transposer,
-	translator sabuhp.Translator,
+	transposer sabuhp.HttpDecoder,
+	translator sabuhp.HttpEncoder,
 ) (*radar.Mux, error)
 
 func DefaultRouter(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	manager *managers.Manager,
-	transposer sabuhp.Transposer,
-	translator sabuhp.Translator,
+	transposer sabuhp.HttpDecoder,
+	translator sabuhp.HttpEncoder,
 ) (*radar.Mux, error) {
 	return DefaultRouterWithNotFound(ctx, logger, manager, sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
 		http.NotFound(writer, request)
@@ -193,8 +193,8 @@ func DefaultRouterWithNotFound(
 	logger sabuhp.Logger,
 	manager *managers.Manager,
 	notFound sabuhp.Handler,
-	transposer sabuhp.Transposer,
-	translator sabuhp.Translator,
+	transposer sabuhp.HttpDecoder,
+	translator sabuhp.HttpEncoder,
 ) (*radar.Mux, error) {
 	return radar.NewMux(radar.MuxConfig{
 		RootPath:   "",
@@ -236,7 +236,7 @@ type ManagerCreator func(
 	id string,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*managers.Manager, error)
 
 func DefaultManager(
@@ -244,7 +244,7 @@ func DefaultManager(
 	id string,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*managers.Manager, error) {
 	return managers.NewManager(managers.ManagerConfig{
 		ID:        id,
@@ -285,7 +285,7 @@ type WorkerHubCreator func(
 	logger sabuhp.Logger,
 	injector *injectors.Injector,
 	registry *actions.WorkerTemplateRegistry,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*actions.ActionHub, error)
 
 type InjectorCreator func(
@@ -303,7 +303,7 @@ func DefaultWorkerHub(
 	logger sabuhp.Logger,
 	injector *injectors.Injector,
 	registry *actions.WorkerTemplateRegistry,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*actions.ActionHub, error) {
 	return DefaultWorkerHubWithEscalation(ctx, logger, injector, registry, transport, func(escalation actions.Escalation, hub *actions.ActionHub) {
 		var logStack = njson.Log(logger)
@@ -330,7 +330,7 @@ func DefaultWorkerHubWithEscalation(
 	logger sabuhp.Logger,
 	injector *injectors.Injector,
 	registry *actions.WorkerTemplateRegistry,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 	escalations actions.EscalationNotification,
 ) (*actions.ActionHub, error) {
 	// create worker hub
@@ -365,14 +365,14 @@ type GorillaHubCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*gorillapub.GorillaHub, sabuhp.Handler, error)
 
 func DefaultGorillaHub(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*gorillapub.GorillaHub, sabuhp.Handler, error) {
 	if manager, isManager := transport.(*managers.Manager); isManager {
 		var wsServer = gorillapub.ManagedGorillaHub(logger, manager, nil, codec)
@@ -386,14 +386,14 @@ type SSEServerCreator func(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*ssepub.SSEServer, error)
 
 func DefaultSSEServer(
 	ctx context.Context,
 	logger sabuhp.Logger,
 	codec sabuhp.Codec,
-	transport sabuhp.Transport,
+	transport sabuhp.MessageBus,
 ) (*ssepub.SSEServer, error) {
 	if manager, isManager := transport.(*managers.Manager); isManager {
 		return ssepub.ManagedSSEServer(ctx, logger, manager, nil, codec), nil
@@ -432,14 +432,14 @@ type Station struct {
 	envConfig      *nenv.EnvStore
 	injector       *injectors.Injector
 	httpHealth     serverpub.HealthPinger
-	transposer     sabuhp.Transposer
-	translator     sabuhp.Translator
+	transposer     sabuhp.HttpDecoder
+	translator     sabuhp.HttpEncoder
 	errGroup       *errgroup.Group
 	httpServer     *serverpub.Server
 	workers        *actions.ActionHub
 	codec          sabuhp.Codec
 	router         *radar.Mux
-	transport      sabuhp.Transport
+	transport      sabuhp.MessageBus
 	manager        *managers.Manager
 	sseHub         *ssepub.SSEServer      // optional sse server
 	gwsHttpHandler sabuhp.Handler         // optional http handler
@@ -557,21 +557,21 @@ func (s *Station) Workers() *actions.ActionHub {
 	return s.workers
 }
 
-func (s *Station) Transport() sabuhp.Transport {
+func (s *Station) Transport() sabuhp.MessageBus {
 	if s.transport == nil {
 		panic("Station.Init is not yet called")
 	}
 	return s.transport
 }
 
-func (s *Station) Translator() sabuhp.Translator {
+func (s *Station) Translator() sabuhp.HttpEncoder {
 	if s.translator == nil {
 		panic("Station.Init is not yet called")
 	}
 	return s.translator
 }
 
-func (s *Station) Transposer() sabuhp.Transposer {
+func (s *Station) Transposer() sabuhp.HttpDecoder {
 	if s.transposer == nil {
 		panic("Station.Init is not yet called")
 	}
@@ -644,7 +644,7 @@ func (s *Station) Init() error {
 
 	// check if we were provided a transport manager as transport
 	var userManager, isManager = transport.(*managers.Manager)
-	var _, isTransportManager = transport.(*managers.TransportManager)
+	var _, isTransportManager = transport.(*managers.PbRelay)
 
 	// create transport subscription manager
 	if !isTransportManager && !isManager {
@@ -657,7 +657,7 @@ func (s *Station) Init() error {
 	}
 
 	if !isManager && isTransportManager {
-		panic("Please provide the raw Transport implement type")
+		panic("Please provide the raw MessageBus implement type")
 	}
 
 	if isManager && !isTransportManager {

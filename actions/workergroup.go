@@ -8,8 +8,8 @@ import (
 
 	"github.com/influx6/npkg"
 
-	"github.com/influx6/sabuhp"
-	"github.com/influx6/sabuhp/injectors"
+	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/injectors"
 
 	"github.com/influx6/npkg/nerror"
 )
@@ -151,7 +151,7 @@ func (wc *WorkerConfig) ensure() {
 
 type WorkRequest struct {
 	Message   *sabuhp.Message
-	Transport sabuhp.Transport
+	Transport sabuhp.MessageBus
 }
 
 // WorkerGroup embodies a small action based workgroup which at their default
@@ -313,7 +313,7 @@ func (w *WorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.Transport) error {
+func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.MessageBus) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -330,7 +330,7 @@ func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.Transport)
 	}
 
 	// check capacity and increase if still available.
-	// Add a new worker to handle this job then.
+	// add a new worker to handle this job then.
 	var maxSlots = atomic.LoadInt64(&w.availableSlots)
 	if maxSlots > 0 {
 		w.addWorker <- struct{}{}

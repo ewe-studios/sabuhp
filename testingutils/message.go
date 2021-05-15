@@ -3,30 +3,26 @@ package testingutils
 import (
 	"testing"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 
-	"github.com/Ewe-Studios/websocket"
+	"github.com/ewe-studios/websocket"
 )
 
 func Msg(topic string, message string, fromAddr string) sabuhp.Message {
 	return sabuhp.Message{
-		Topic:    topic,
-		FromAddr: fromAddr,
-		Payload:  []byte(message),
-		MessageMeta: sabuhp.MessageMeta{
-			ContentType: sabuhp.MessageContentType,
-		},
+		Topic:       topic,
+		FromAddr:    fromAddr,
+		Bytes:       []byte(message),
+		ContentType: sabuhp.MessageContentType,
 	}
 }
 
 func EncodedMsg(codec sabuhp.Codec, topic string, message string, fromAddr string) ([]byte, error) {
 	return codec.Encode(&sabuhp.Message{
-		Topic:    topic,
-		FromAddr: fromAddr,
-		Payload:  []byte(message),
-		MessageMeta: sabuhp.MessageMeta{
-			ContentType: sabuhp.MessageContentType,
-		},
+		Topic:       topic,
+		FromAddr:    fromAddr,
+		Bytes:       []byte(message),
+		ContentType: sabuhp.MessageContentType,
 	})
 }
 

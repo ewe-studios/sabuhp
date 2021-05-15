@@ -8,16 +8,11 @@ import (
 	"github.com/influx6/npkg/nunsafe"
 )
 
-type WrappedCodec interface {
-	Encode(payload *WrappedPayload) ([]byte, error)
-	Decode(b []byte) (*WrappedPayload, error)
-}
-
 // Codec embodies implementation for the serialization of
 // a message into bytes and vice-versa.
 type Codec interface {
-	Encode(msg *Message) ([]byte, error)
-	Decode(b []byte) (*Message, error)
+	Encode(msg Message) ([]byte, error)
+	Decode(b []byte) (Message, error)
 }
 
 type Client interface {
@@ -38,7 +33,7 @@ func NewCodecWriter(client Client, codec Codec, logger Logger) *CodecWriter {
 	}
 }
 
-func (c *CodecWriter) Send(msg *Message, timeout time.Duration) error {
+func (c *CodecWriter) Send(msg Message, timeout time.Duration) error {
 	var encoded, encodeErr = c.Codec.Encode(msg)
 	if encodeErr != nil {
 		var wrappedErr = nerror.WrapOnly(encodeErr)

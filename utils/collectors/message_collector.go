@@ -7,7 +7,7 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 type BatchHandler func(chan *sabuhp.Message)

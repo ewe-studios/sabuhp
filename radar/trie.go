@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/influx6/sabuhp"
+	"github.com/ewe-studios/sabuhp"
 )
 
 // Node is the trie's node which path patterns with their data like an HTTP handler are saved to.
