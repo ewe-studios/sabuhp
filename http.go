@@ -93,7 +93,7 @@ type HeaderModifications func(header http.Header)
 // HttpDecoder transforms a http request into a Message to be
 // delivered.
 type HttpDecoder interface {
-	Decode(req *http.Request, params Params) ([]Message, error)
+	Decode(req *http.Request, params Params) (Message, error)
 }
 
 // HttpEncoder transforms a message into an appropriate response
@@ -112,7 +112,7 @@ func NewHttpDecoderImpl(codec Codec, logger Logger, maxBody int64) *HttpDecoderI
 	return &HttpDecoderImpl{Codec: codec, Logger: logger, MaxBodySize: maxBody}
 }
 
-func (r *HttpDecoderImpl) Decode(req *http.Request, params Params) ([]Message, error) {
+func (r *HttpDecoderImpl) Decode(req *http.Request, params Params) (Message, error) {
 	var contentType = req.Header.Get("Content-Type")
 	var contentTypeLower = strings.ToLower(contentType)
 
@@ -121,25 +121,25 @@ func (r *HttpDecoderImpl) Decode(req *http.Request, params Params) ([]Message, e
 	}
 
 	var (
-		topic =    req.URL.Path
-		fromAddr =  req.RemoteAddr
-		requestForm =            req.Form
-		requestContentType =     contentType
-		requestPath  =           req.URL.Path
-		requestQuery =           req.URL.Query()
-		requestHeaders =         Header(req.Header.Clone())
-		requestCookies =         ReadCookies(Header(req.Header), "")
+		topic              = req.URL.Path
+		fromAddr           = req.RemoteAddr
+		requestForm        = req.Form
+		requestContentType = contentType
+		requestPath        = req.URL.Path
+		requestQuery       = req.URL.Query()
+		requestHeaders     = Header(req.Header.Clone())
+		requestCookies     = ReadCookies(Header(req.Header), "")
 	)
 
 	// if it's a multipart form, get multi-part reader: multipart/form-data or a multipart/mixed
-	if strings.Contains(contentTypeLower, "multipart/form-data") ||  strings.Contains(contentTypeLower, "multipart/mixed"){
+	if strings.Contains(contentTypeLower, "multipart/form-data") || strings.Contains(contentTypeLower, "multipart/mixed") {
 		var reader, getReaderErr = req.MultipartReader()
 		if getReaderErr != nil {
-			return nil, nerror.WrapOnly(getReaderErr)
+			return Message{}, nerror.WrapOnly(getReaderErr)
 		}
 
 		var (
-			endId = nxid.New()
+			endId  = nxid.New()
 			partId = nxid.New()
 		)
 
@@ -151,109 +151,107 @@ func (r *HttpDecoderImpl) Decode(req *http.Request, params Params) ([]Message, e
 				break
 			}
 			if partErr != nil {
-				return messages, nerror.WrapOnly(partErr)
+				return Message{}, nerror.WrapOnly(partErr)
 			}
 
 			readBuffer.Reset()
 			var _, readErr = readBuffer.ReadFrom(part)
 			if readErr != nil {
-				return messages, nerror.WrapOnly(readErr)
+				return Message{}, nerror.WrapOnly(readErr)
 			}
 
 			var messageBytes = make([]byte, readBuffer.Len())
 			_ = copy(messageBytes, readBuffer.Bytes())
 
 			messages = append(messages, Message{
-				Id:       nxid.New(),
-				Topic:    topic,
-				PartId: partId,
-				EndPartId: endId,
-				FromAddr: fromAddr,
-				Bytes:    messageBytes,
-				Params:              params,
-				FileName: part.FileName(),
-				FormName: part.FileName(),
-				Path:            requestPath,
-				Headers:         requestHeaders,
-				Cookies:         requestCookies,
-				Query:           requestQuery,
-				Form:            requestForm,
-				ContentType:     requestContentType,
-				Metadata:            map[string]string{},
+				Id:          nxid.New(),
+				Topic:       topic,
+				PartId:      partId,
+				EndPartId:   endId,
+				FromAddr:    fromAddr,
+				Bytes:       messageBytes,
+				Params:      params,
+				FileName:    part.FileName(),
+				FormName:    part.FileName(),
+				Path:        requestPath,
+				Headers:     requestHeaders,
+				Cookies:     requestCookies,
+				Query:       requestQuery,
+				Form:        requestForm,
+				ContentType: requestContentType,
+				Metadata:    map[string]string{},
 			})
 		}
 
 		messages = append(messages, Message{
-			Id:       endId,
-			Topic:    topic,
-			PartId: partId,
-			EndPartId: endId,
-			FromAddr: fromAddr,
-			Params:              params,
-			Path:            requestPath,
-			Headers:         requestHeaders,
-			Cookies:         requestCookies,
-			Query:           requestQuery,
-			Form:            requestForm,
-			ContentType:     requestContentType,
-			Metadata:            map[string]string{},
+			Id:          endId,
+			Topic:       topic,
+			PartId:      partId,
+			EndPartId:   endId,
+			FromAddr:    fromAddr,
+			Params:      params,
+			Path:        requestPath,
+			Headers:     requestHeaders,
+			Cookies:     requestCookies,
+			Query:       requestQuery,
+			Form:        requestForm,
+			ContentType: requestContentType,
+			Metadata:    map[string]string{},
 		})
 
-		return messages, nil
+		var firstMessage = messages[0]
+		firstMessage.Parts = messages[1:]
+		return firstMessage, nil
 	}
 
 	if strings.Contains(contentTypeLower, "application/x-www-form-urlencoded") ||
 		strings.Contains(contentTypeLower, "form-urlencoded") {
 		if err := req.ParseForm(); err != nil {
-			return nil, nerror.WrapOnly(err)
+			return Message{}, nerror.WrapOnly(err)
 		}
 
-		return []Message{
-			{
-				Id:       nxid.New(),
-				Topic:    topic,
-				FromAddr: fromAddr,
-				Path:            requestPath,
-				Headers:         requestHeaders,
-				Cookies:         requestCookies,
-				Query:           requestQuery,
-				Form:            requestForm,
-				ContentType:     requestContentType,
-				Metadata:            map[string]string{},
-				Params:              params,
-			},
+		return Message{
+			Id:          nxid.New(),
+			Topic:       topic,
+			FromAddr:    fromAddr,
+			Path:        requestPath,
+			Headers:     requestHeaders,
+			Cookies:     requestCookies,
+			Query:       requestQuery,
+			Form:        requestForm,
+			ContentType: requestContentType,
+			Metadata:    map[string]string{},
+			Params:      params,
 		}, nil
 	}
 
 	var content bytes.Buffer
 	if _, err := io.Copy(&content, req.Body); err != nil {
-		return nil, nerror.WrapOnly(err)
+		return Message{}, nerror.WrapOnly(err)
 	}
 
 	// if its not an explicit application/x-event-message type then we
 	// assume the body is the message payload.
 	if !strings.Contains(contentTypeLower, MessageContentType) {
-		return []Message{
-			{
-				Id:       nxid.New(),
-				Topic:    topic,
-				FromAddr: fromAddr,
-				Bytes:    content.Bytes(),
-				Path:            requestPath,
-				Headers:         requestHeaders,
-				Cookies:         requestCookies,
-				Query:           requestQuery,
-				Form:            requestForm,
-				ContentType:     requestContentType,
-				Metadata:            map[string]string{},
-				Params:              params,
-			},
+		return Message{
+			Id:          nxid.New(),
+			Topic:       topic,
+			FromAddr:    fromAddr,
+			Bytes:       content.Bytes(),
+			Path:        requestPath,
+			Headers:     requestHeaders,
+			Cookies:     requestCookies,
+			Query:       requestQuery,
+			Form:        requestForm,
+			ContentType: requestContentType,
+			Metadata:    map[string]string{},
+			Params:      params,
 		}, nil
 	}
 
 	var message, messageErr = r.Codec.Decode(content.Bytes())
 	if messageErr != nil {
-		return nil, nerror.WrapOnly(messageErr)
+		return Message{}, nerror.WrapOnly(messageErr)
 	}
 
 	message.Cookies = requestCookies
@@ -275,7 +273,7 @@ func (r *HttpDecoderImpl) Decode(req *http.Request, params Params) ([]Message, e
 		}
 	}
 
-	return []Message{message}, nil
+	return message, nil
 }
 
 // MaxBytesReader is similar to io.LimitReader but is intended for

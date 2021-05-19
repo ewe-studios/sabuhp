@@ -13,6 +13,7 @@ var _ sabuhp.Codec = (*JsonCodec)(nil)
 type JsonCodec struct{}
 
 func (j *JsonCodec) Encode(message sabuhp.Message) ([]byte, error) {
+	message.Parts = nil
 	encoded, encodedErr := json.Marshal(message)
 	if encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
@@ -26,5 +27,6 @@ func (j *JsonCodec) Decode(b []byte) (sabuhp.Message, error) {
 	if jsonErr := json.Unmarshal(b, &message); jsonErr != nil {
 		return message, nerror.WrapOnly(jsonErr)
 	}
+	message.Future = nil
 	return message, nil
 }

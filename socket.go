@@ -1,13 +1,14 @@
 package sabuhp
 
 import (
+	"net"
+	"sync"
+
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nthen"
 	"github.com/influx6/npkg/nxid"
-	"net"
-	"sync"
 )
 
 // SocketHandler defines the function contract to be called for a socket instace.
@@ -29,7 +30,7 @@ type SocketByteHandler func(b []byte, from Socket) error
 // will cause the immediate closure of that socket and ending communication
 // with the client and the error will be logged. So unless your intention is to
 // end the connection, handle it yourself.
-type SocketMessageHandler func(b []Message, from Socket) error
+type SocketMessageHandler func(b Message, from Socket) error
 
 type SocketStat struct {
 	Addr       net.Addr
@@ -71,26 +72,64 @@ type SocketServer interface {
 	Stream(SocketService)
 }
 
+type StreamFunc struct {
+	Listen      func(Message, Socket) error
+	Subscribe   func(Message, Socket) error
+	Unsubscribe func(Message, Socket) error
+	Closed      func(Socket)
+}
+
+func (st StreamFunc) SocketClosed(socket Socket) {
+	if st.Closed == nil {
+		return
+	}
+	st.Closed(socket)
+}
+
+func (st StreamFunc) SocketOpened(socket Socket) {
+	socket.Listen(func(message Message, from Socket) error {
+		if message.Topic == UNSUBSCRIBE {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				return nerror.New("no unsubscription topic or group provided")
+			}
+			return st.Unsubscribe(message, from)
+		}
+
+		if message.Topic == SUBSCRIBE {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				return nerror.New("no subscription topic or group provided")
+			}
+			return st.Subscribe(message, from)
+		}
+
+		if err := st.Listen(message, from); err != nil {
+			return nerror.WrapOnly(err)
+		}
+
+		return nil
+	})
+}
+
 type StreamBus struct {
-	Logger Logger
-	Bus MessageBus
-	ml sync.RWMutex
+	Logger   Logger
+	Bus      MessageBus
+	ml       sync.RWMutex
 	channels map[nxid.ID][]Channel
 }
 
 func NewStreamBus(logger Logger, bus MessageBus) *StreamBus {
-	return &StreamBus{Logger: logger, Bus: bus, channels: map[nxid.ID][]Channel{},}
+	return &StreamBus{Logger: logger, Bus: bus, channels: map[nxid.ID][]Channel{}}
 }
 
 // WithBus returns the instance of a StreamBus which will be connected to the provided SocketServer
-// and handle delivery of messages to a message bus and subscription/unscriptions as well.
+// and handle delivery of messages to a message bus and subscription/unsubcriptions as well.
 func WithBus(logger Logger, socketServer SocketServer, bus MessageBus) *StreamBus {
 	var stream = NewStreamBus(logger, bus)
 	socketServer.Stream(stream)
 	return stream
 }
 
-func (st *StreamBus) SocketClosed(socket Socket){
+func (st *StreamBus) SocketClosed(socket Socket) {
 	st.ml.RLock()
 	defer st.ml.RUnlock()
 	if channels, hasChannel := st.channels[socket.ID()]; hasChannel {
@@ -100,11 +139,9 @@ func (st *StreamBus) SocketClosed(socket Socket){
 	}
 }
 
-func (st *StreamBus) SocketOpened(socket Socket){
-	socket.Listen(func(messages []Message, from Socket) error {
-		var subs, unsubs, datas = SplitMessagesToGroups(messages)
-
-		for _, message := range unsubs {
+func (st *StreamBus) SocketOpened(socket Socket) {
+	socket.Listen(func(message Message, from Socket) error {
+		if message.Topic == UNSUBSCRIBE {
 			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
 				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
 					event.Int("_level", int(npkg.ERROR))
@@ -114,10 +151,10 @@ func (st *StreamBus) SocketOpened(socket Socket){
 					event.Object("socket_stat", from.Stat())
 				}))
 			}
-			_ = st.SocketUnsubscribe(message, from)
+			return st.SocketUnsubscribe(message, from)
 		}
 
-		for _, message := range subs {
+		if message.Topic == SUBSCRIBE {
 			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
 				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
 					event.Int("_level", int(npkg.ERROR))
@@ -127,10 +164,10 @@ func (st *StreamBus) SocketOpened(socket Socket){
 					event.Object("socket_stat", from.Stat())
 				}))
 			}
-			_ = st.SocketSubscribe(message, from)
+			return st.SocketSubscribe(message, from)
 		}
 
-		if err := st.SocketBusSend(datas, from); err != nil {
+		if err := st.SocketBusSend(message, from); err != nil {
 			st.Logger.Log(njson.MJSON("failed to handle message from from", func(event npkg.Encoder) {
 				event.Int("_level", int(npkg.ERROR))
 				event.Error("error", err)
@@ -144,8 +181,8 @@ func (st *StreamBus) SocketOpened(socket Socket){
 	})
 }
 
-func (st *StreamBus) SocketSubscribe(b Message, socket Socket) MessageErr{
-	var channel = st.Bus.Listen(b.SubscribeTo, b.SubscribeGroup,TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+func (st *StreamBus) SocketSubscribe(b Message, socket Socket) MessageErr {
+	var channel = st.Bus.Listen(b.SubscribeTo, b.SubscribeGroup, TransportResponseFunc(func(message Message, transport Transport) MessageErr {
 		var ft = message.Future
 		if message.Future == nil {
 			ft = nthen.NewFuture()
@@ -181,7 +218,7 @@ func (st *StreamBus) SocketSubscribe(b Message, socket Socket) MessageErr{
 	return nil
 }
 
-func (st *StreamBus) SocketUnsubscribe(b Message, socket Socket) MessageErr{
+func (st *StreamBus) SocketUnsubscribe(b Message, socket Socket) MessageErr {
 	st.ml.RLock()
 	defer st.ml.RUnlock()
 	if channels, hasChannel := st.channels[socket.ID()]; hasChannel {
@@ -194,25 +231,20 @@ func (st *StreamBus) SocketUnsubscribe(b Message, socket Socket) MessageErr{
 	return nil
 }
 
-func (st *StreamBus) SocketBusSend(b []Message, _ Socket) MessageErr{
-	var fts = make([]*nthen.Future, 0, len(b))
-	for index, mb := range b {
-		var mbPointer = &mb
-		if mbPointer.Future == nil {
-			mbPointer.Future = nthen.NewFuture()
-		}
-		fts[index] = mb.Future
+func (st *StreamBus) SocketBusSend(b Message, _ Socket) MessageErr {
+	var mb = &b
+	if mb.Future == nil {
+		mb.Future = nthen.NewFuture()
 	}
 
-	st.Bus.Send(b...)
-	return WrapErr(nthen.WaitFor(fts...).Err(), false)
+	st.Bus.Send(b)
+	return WrapErr(mb.Future.Err(), false)
 }
-
 
 type StreamRelay struct {
 	Logger Logger
-	Relay *PbRelay
-	Bus MessageBus
+	Relay  *PbRelay
+	Bus    MessageBus
 }
 
 func NewStreamRelay(logger Logger, bus MessageBus, relay *PbRelay) *StreamRelay {
@@ -227,15 +259,13 @@ func WithRelay(logger Logger, socketServer SocketServer, bus MessageBus, relay *
 	return stream
 }
 
-func (st *StreamRelay) SocketClosed(socket Socket){
+func (st *StreamRelay) SocketClosed(socket Socket) {
 	st.Relay.UnlistenAllWithId(socket.ID())
 }
 
-func (st *StreamRelay) SocketOpened(socket Socket){
-	socket.Listen(func(messages []Message, from Socket) error {
-		var subs, unsubs, datas = SplitMessagesToGroups(messages)
-
-		for _, message := range unsubs {
+func (st *StreamRelay) SocketOpened(socket Socket) {
+	socket.Listen(func(message Message, from Socket) error {
+		if message.Topic == UNSUBSCRIBE {
 			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
 				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
 					event.Int("_level", int(npkg.ERROR))
@@ -245,10 +275,10 @@ func (st *StreamRelay) SocketOpened(socket Socket){
 					event.Object("socket_stat", from.Stat())
 				}))
 			}
-			_ = st.SocketUnsubscribe(message, from)
+			return st.SocketUnsubscribe(message, from)
 		}
 
-		for _, message := range subs {
+		if message.Topic == SUBSCRIBE {
 			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
 				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
 					event.Int("_level", int(npkg.ERROR))
@@ -258,10 +288,10 @@ func (st *StreamRelay) SocketOpened(socket Socket){
 					event.Object("socket_stat", from.Stat())
 				}))
 			}
-			_ = st.SocketSubscribe(message, from)
+			return st.SocketSubscribe(message, from)
 		}
 
-		if err := st.SocketBusSend(datas, from); err != nil {
+		if err := st.SocketBusSend(message, from); err != nil {
 			st.Logger.Log(njson.MJSON("failed to handle message from from", func(event npkg.Encoder) {
 				event.Int("_level", int(npkg.ERROR))
 				event.Error("error", err)
@@ -275,7 +305,7 @@ func (st *StreamRelay) SocketOpened(socket Socket){
 	})
 }
 
-func (st *StreamRelay) SocketSubscribe(b Message, socket Socket) MessageErr{
+func (st *StreamRelay) SocketSubscribe(b Message, socket Socket) MessageErr {
 	var group = st.Relay.Group(b.SubscribeTo, b.SubscribeGroup)
 	var channel = group.Listen(TransportResponseFunc(func(message Message, transport Transport) MessageErr {
 		var ft = message.Future
@@ -307,7 +337,7 @@ func (st *StreamRelay) SocketSubscribe(b Message, socket Socket) MessageErr{
 	return nil
 }
 
-func (st *StreamRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr{
+func (st *StreamRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr {
 	var group = st.Relay.Group(b.SubscribeTo, b.SubscribeGroup)
 	group.Remove(socket.ID())
 	if b.Future != nil {
@@ -316,22 +346,22 @@ func (st *StreamRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr{
 	return nil
 }
 
-func (st *StreamRelay) SocketBusSend(b []Message, _ Socket) MessageErr{
-	var fts = make([]*nthen.Future, 0, len(b))
-	for index, mb := range b {
-		var mbPointer = &mb
-		if mbPointer.Future == nil {
-			mbPointer.Future = nthen.NewFuture()
-		}
-		fts[index] = mb.Future
+func (st *StreamRelay) SocketBusSend(b Message, _ Socket) MessageErr {
+	var mb = &b
+	if mb.Future == nil {
+		mb.Future = nthen.NewFuture()
 	}
 
-	st.Bus.Send(b...)
-	return WrapErr(nthen.WaitFor(fts...).Err(), false)
+	st.Bus.Send(b)
+	var itemErr = mb.Future.Err()
+	if itemErr != nil {
+		return WrapErr(mb.Future.Err(), false)
+	}
+	return nil
 }
 
 type SocketServers struct {
-	sm sync.RWMutex
+	sm      sync.RWMutex
 	streams []SocketService
 }
 
@@ -340,10 +370,10 @@ func NewSocketServers() *SocketServers {
 }
 
 func (htp *SocketServers) SocketClosed(socket Socket) {
-	htp.sm.RLock(   )
+	htp.sm.RLock()
 	defer htp.sm.RUnlock()
 	for _, stream := range htp.streams {
-		stream.SocketOpened(socket)
+		stream.SocketClosed(socket)
 	}
 }
 
@@ -351,7 +381,7 @@ func (htp *SocketServers) SocketOpened(socket Socket) {
 	htp.sm.RLock()
 	defer htp.sm.RUnlock()
 	for _, stream := range htp.streams {
-		stream.SocketClosed(socket)
+		stream.SocketOpened(socket)
 	}
 }
 

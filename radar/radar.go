@@ -7,7 +7,6 @@ import (
 
 	"github.com/influx6/npkg/nerror"
 
-	"github.com/ewe-studios/sabuhp/managers"
 	"github.com/ewe-studios/sabuhp/sockets/hsocks"
 	"github.com/ewe-studios/sabuhp/utils"
 
@@ -15,14 +14,14 @@ import (
 )
 
 type MuxConfig struct {
-	RootPath   string
-	Logger     sabuhp.Logger
-	NotFound   sabuhp.Handler
-	Manager    *managers.Manager
-	Ctx        context.Context
-	Transposer sabuhp.HttpDecoder
-	Translator sabuhp.HttpEncoder
-	Headers    sabuhp.HeaderModifications
+	RootPath string
+	Logger   sabuhp.Logger
+	NotFound sabuhp.Handler
+	Relay    *sabuhp.PbRelay
+	Ctx      context.Context
+	Decoder  sabuhp.HttpDecoder
+	Encoder  sabuhp.HttpEncoder
+	Headers  sabuhp.HeaderModifications
 }
 
 // Mux is Request multiplexer.
@@ -36,9 +35,9 @@ type Mux struct {
 	logger       sabuhp.Logger
 	NotFound     sabuhp.Handler
 	subRoutes    []sabuhp.MessageRouter
+	relay        *sabuhp.PbRelay
 	pre          sabuhp.Wrappers
 	preHttp      sabuhp.HttpWrappers
-	manager      *managers.Manager
 	httpToEvents *hsocks.HttpServlet
 	routes       map[string]bool
 }
@@ -47,17 +46,16 @@ func NewMux(config MuxConfig) *Mux {
 	return &Mux{
 		config:   config,
 		rootPath: config.RootPath,
+		relay:    config.Relay,
 		trie:     NewTrie(),
-		manager:  config.Manager,
 		logger:   config.Logger,
 		NotFound: config.NotFound,
 		routes:   map[string]bool{},
 		httpToEvents: hsocks.ManagedHttpServlet(
 			config.Ctx,
 			config.Logger,
-			config.Transposer,
-			config.Translator,
-			config.Manager,
+			config.Decoder,
+			config.Encoder,
 			config.Headers,
 		),
 	}
@@ -110,7 +108,10 @@ func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, muxHandler)
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b []sabuhp.Message, from sabuhp.Socket) error {
+					muxHandler.Handle()
+					return nil
+				})
 			},
 		),
 	))
@@ -145,16 +146,17 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 // Event registers handlers for a giving event returning it's channel.
 //
 // Understand that closing the channel does not close the http endpoint.
-func (m *Mux) Event(eventName string, handler sabuhp.TransportResponse) sabuhp.Channel {
+func (m *Mux) Event(eventName string, grp string, handler sabuhp.TransportResponse) sabuhp.Channel {
 	var muxHandler = m.pre.For(handler)
-	return m.manager.Listen(eventName, muxHandler)
+	var gp = m.relay.Group(eventName, grp)
+	return gp.Listen(muxHandler)
 }
 
 // Service registers handlers for giving event returning
 // events channel.
 //
 // Understand that closing the channel does not close the http endpoint.
-func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportResponse, methods ...string) sabuhp.Channel {
+func (m *Mux) Service(eventName string, grp string, route string, handler sabuhp.TransportResponse, methods ...string) sabuhp.Channel {
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
@@ -171,7 +173,9 @@ func (m *Mux) Service(eventName string, route string, handler sabuhp.TransportRe
 			},
 		),
 	))
-	return m.manager.Listen(eventName, muxHandler)
+
+	var gp = m.relay.Group(eventName, grp)
+	return gp.Listen(muxHandler)
 }
 
 // RedirectAsPath redirects all requests from giving http route into the pubsub using

@@ -2,6 +2,7 @@ package hsocks
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -43,22 +44,14 @@ func TestNewHub(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
 	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
 
-	var addedListener = make(chan struct{}, 1)
-	var listeners = map[string][]sabuhp.TransportResponse{}
-
-	var bus = &sabuhp.BusBuilder{
-		SendFunc: func(data ...sabuhp.Message) {
-
-		},
-		ListenFunc: func(topic string, grp string, handler sabuhp.TransportResponse) sabuhp.Channel {
-			return subChannel{
-				topic: topic,
-				gp:    grp,
-			}
-		},
+	var mx sabuhp.StreamFunc
+	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
+		fmt.Println("Received send request: ", b.Bytes, b.Topic)
+		var rm = b.ReplyTo()
+		rm.WithPayload([]byte("yay!"))
+		socket.Send(rm)
+		return nil
 	}
-
-	var manager = sabuhp.NewPbRelay(controlCtx, logger)
 
 	var codec = &codecs.JsonCodec{}
 	var servletServer = ManagedHttpServlet(
@@ -70,7 +63,7 @@ func TestNewHub(t *testing.T) {
 	)
 	require.NotNil(t, servletServer)
 
-	_ = sabuhp.WithRelay(logger, servletServer, bus, manager)
+	servletServer.Stream(&mx)
 
 	var httpServer = httptest.NewServer(servletServer)
 
@@ -84,9 +77,6 @@ func TestNewHub(t *testing.T) {
 	require.NoError(t, socketErr)
 	require.NotNil(t, socket)
 
-	<-addedListener
-	require.Len(t, listeners["hello"], 1)
-
 	var topicMessage = testingutils.Msg("hello", "alex", "me")
 	topicMessage.Future = nthen.NewFuture()
 
@@ -97,7 +87,7 @@ func TestNewHub(t *testing.T) {
 	require.NoError(t, ft.Err())
 
 	var response = ft.Value().(sabuhp.Message)
-	require.Equal(t, "alex", string(response.Bytes))
+	require.Equal(t, "yay!", string(response.Bytes))
 
 	controlStopFunc()
 

@@ -2,6 +2,7 @@ package ssepub
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -9,74 +10,42 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ewe-studios/sabuhp/codecs"
-	"github.com/ewe-studios/sabuhp/managers"
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/testingutils"
-	"github.com/influx6/npkg/njson"
 )
 
 func TestNewSSEHub(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
 	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
 
-	var addedListener = make(chan struct{}, 1)
-	var listeners = map[string][]sabuhp.TransportResponse{}
-	var transport = &testingutils.TransportImpl{
-		ListenFunc: func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
-			listeners[topic] = append(listeners[topic], handler)
-			addedListener <- struct{}{}
-			return &testingutils.NoPubSubChannel{}
-		},
-		SendToAllFunc: func(data *sabuhp.Message, timeout time.Duration) error {
-			var sector = listeners[data.Topic]
-			for _, handler := range sector {
-				if err := handler.Handle(data, nil); err != nil {
-					var cj = njson.MJSON("error occurred")
-					cj.String("error", err.Error())
-					logger.Log(cj)
-				}
-			}
-
-			var cj = njson.MJSON("sent message")
-			cj.Object("message", data)
-			logger.Log(cj)
-			return nil
-		},
-		SendToOneFunc: func(data *sabuhp.Message, timeout time.Duration) error {
-			var targetListeners = listeners[data.Topic]
-			if len(targetListeners) > 0 {
-				_ = targetListeners[0].Handle(data, nil)
-			}
-			return nil
-		},
-	}
-
 	var codec = &codecs.JsonCodec{}
-
-	var managerConfig = managers.ManagerConfig{
-		ID:        nxid.New().String(),
-		Transport: transport,
-		Codec:     codec,
-		Ctx:       controlCtx,
-		Logger:    logger,
-	}
-	var manager = managers.NewManager(managerConfig)
-
-	var sseServer = ManagedSSEServer(controlCtx, logger, manager, nil, codec)
+	var sseServer = ManagedSSEServer(controlCtx, logger, nil, codec)
 	require.NotNil(t, sseServer)
+
+	var mx sabuhp.StreamFunc
+	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
+		fmt.Println("Received send request: ", b.Bytes, b.Topic)
+		var rm = b.ReplyTo()
+		rm.WithPayload([]byte("yay!"))
+		socket.Send(rm)
+		return nil
+	}
+
+	sseServer.Stream(&mx)
 
 	var httpServer = httptest.NewServer(sseServer)
 
 	var clientHub = NewSSEHub(controlCtx, 5, httpServer.Client(), codec, logger, linearBackOff)
 
-	var recvMsg = make(chan *sabuhp.Message, 1)
+	var recvMsg = make(chan sabuhp.Message, 1)
 	var socket, socketErr = clientHub.Get(
-		func(message *sabuhp.Message, socket *SSEClient) error {
-			require.NotEmpty(t, message)
+		func(b sabuhp.Message, socket *SSEClient) error {
+			fmt.Println("Received response: ", b.Bytes, b.Topic)
+			require.NotEmpty(t, b)
 			require.NotNil(t, socket)
-			recvMsg <- message
+			recvMsg <- b
 			return nil
 		},
 		nxid.New(),
@@ -86,32 +55,18 @@ func TestNewSSEHub(t *testing.T) {
 	require.NoError(t, socketErr)
 	require.NotNil(t, socket)
 
-	var subscribeMessage = testingutils.Msg(sabuhp.SUBSCRIBE, "hello", "me")
-	var sendErr = socket.Send("POST", &subscribeMessage, 0)
+	var subscribeMessage = testingutils.Msg("hello", "alex", "me")
+	var sendErr = socket.Send("POST", subscribeMessage, 0)
 	require.NoError(t, sendErr)
-
-	<-addedListener
-	require.Len(t, listeners["hello"], 1)
-
-	var topicMessage = testingutils.Msg("hello", "alex", "me")
-	require.NotEmpty(t, topicMessage)
-
-	var sendErr2 = socket.Send("POST", &topicMessage, 0)
-	require.NoError(t, sendErr2)
 
 	var okMessage = <-recvMsg
 	require.NotNil(t, okMessage)
-	require.Equal(t, okMessage.Topic, sabuhp.DONE)
-
-	var helloMessage = <-recvMsg
-	require.NotNil(t, helloMessage)
-	require.Equal(t, "alex", string(helloMessage.Bytes))
+	require.Equal(t, "yay!", string(okMessage.Bytes))
 
 	controlStopFunc()
 
 	httpServer.Close()
 	socket.Wait()
-	manager.Wait()
 }
 
 func linearBackOff(i int) time.Duration {

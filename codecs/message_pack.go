@@ -14,6 +14,7 @@ var _ sabuhp.Codec = (*MessagePackCodec)(nil)
 type MessagePackCodec struct{}
 
 func (j *MessagePackCodec) Encode(message sabuhp.Message) ([]byte, error) {
+	message.Parts = nil
 	var buf bytes.Buffer
 	if encodedErr := msgpack.NewEncoder(&buf).Encode(message); encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
@@ -26,5 +27,6 @@ func (j *MessagePackCodec) Decode(b []byte) (sabuhp.Message, error) {
 	if jsonErr := msgpack.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
 		return message, nerror.WrapOnly(jsonErr)
 	}
+	message.Future = nil
 	return message, nil
 }

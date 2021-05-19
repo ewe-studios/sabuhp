@@ -2,11 +2,12 @@ package sabuhp
 
 import (
 	"fmt"
-	"github.com/influx6/npkg/nthen"
 	"io"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/influx6/npkg/nthen"
 
 	"github.com/influx6/npkg/nunsafe"
 
@@ -129,16 +130,27 @@ type Message struct {
 	// sender and provide some values to keyed expectation, unlike metadata
 	// it has specific input in the message.
 	Params Params
+
+	// Parts are possible fragments collected of a message which was split into
+	// multiple parts to send over the wire and have being collected through the use
+	// of the PartId.
+	//
+	// We do this because we do not let handlers handle a list of messages but one
+	// and to accomodate large messages split in parts or messages which are logical
+	// parts of themselves, this field is an option, generally.
+	// Codecs should never read this
+	Parts []Message
 }
 
 // ReplyTo returns a new instance of a Message using the FromAddr as the
 // topic.
 func (m Message) ReplyTo() Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    m.FromAddr,
-		Params:   Params{},
-		Metadata: Params{},
+		ContentType: MessageContentType,
+		Id:          nxid.New(),
+		Topic:       m.FromAddr,
+		Params:      Params{},
+		Metadata:    Params{},
 	}
 }
 
@@ -146,10 +158,11 @@ func (m Message) ReplyTo() Message {
 // topic.
 func (m Message) ReplyToWith(params Params, meta Params, payload []byte) Message {
 	return Message{
-		Params:   params,
-		Metadata: meta,
-		Id:       nxid.New(),
-		Topic:    m.FromAddr,
+		ContentType: MessageContentType,
+		Params:      params,
+		Metadata:    meta,
+		Id:          nxid.New(),
+		Topic:       m.FromAddr,
 	}
 }
 
@@ -164,63 +177,63 @@ const MessageContentType = "application/x-event-message"
 
 func NewMessage(topic string, fromAddr string, payload []byte) Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    topic,
-		FromAddr: fromAddr,
-		Bytes:    payload,
+		Id:          nxid.New(),
+		Topic:       topic,
+		FromAddr:    fromAddr,
+		Bytes:       payload,
 		ContentType: MessageContentType,
 	}
 }
 
 func NOTOK(message string, fromAddr string) Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    NOTDONE,
-		FromAddr: fromAddr,
-		Bytes:    []byte(message),
+		Id:          nxid.New(),
+		Topic:       NOTDONE,
+		FromAddr:    fromAddr,
+		Bytes:       []byte(message),
 		ContentType: MessageContentType,
 	}
 }
 
 func BasicMsg(topic string, message string, fromAddr string) Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    topic,
-		FromAddr: fromAddr,
-		Bytes:    []byte(message),
+		Id:          nxid.New(),
+		Topic:       topic,
+		FromAddr:    fromAddr,
+		Bytes:       []byte(message),
 		ContentType: MessageContentType,
 	}
 }
 
 func OK(message string, fromAddr string) Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    DONE,
-		FromAddr: fromAddr,
-		Bytes:    []byte(message),
+		Id:          nxid.New(),
+		Topic:       DONE,
+		FromAddr:    fromAddr,
+		Bytes:       []byte(message),
 		ContentType: MessageContentType,
 	}
 }
 
 func UnsubscribeMessage(topic string, grp string, fromAddr string) Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    UNSUBSCRIBE,
-		FromAddr: fromAddr,
+		Id:             nxid.New(),
+		Topic:          UNSUBSCRIBE,
+		FromAddr:       fromAddr,
 		SubscribeGroup: grp,
-		SubscribeTo: topic,
-		ContentType: MessageContentType,
+		SubscribeTo:    topic,
+		ContentType:    MessageContentType,
 	}
 }
 
 func SubscribeMessage(topic string, grp string, fromAddr string) Message {
 	return Message{
-		Id:       nxid.New(),
-		Topic:    SUBSCRIBE,
-		FromAddr: fromAddr,
+		Id:             nxid.New(),
+		Topic:          SUBSCRIBE,
+		FromAddr:       fromAddr,
 		SubscribeGroup: grp,
-		SubscribeTo: topic,
-		ContentType: MessageContentType,
+		SubscribeTo:    topic,
+		ContentType:    MessageContentType,
 	}
 }
 

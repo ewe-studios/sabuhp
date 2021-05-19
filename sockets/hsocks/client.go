@@ -54,8 +54,8 @@ func (se *HttpHub) For(
 }
 
 type SendClient struct {
-	id         nxid.ID
 	maxRetries int
+	id         nxid.ID
 	route      string
 	codec      sabuhp.Codec
 	logger     sabuhp.Logger

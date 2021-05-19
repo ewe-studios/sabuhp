@@ -27,7 +27,7 @@ var (
 	dataHeaderBytes = []byte("data:")
 )
 
-type MessageHandler func(message *sabuhp.Message, socket *SSEClient) error
+type MessageHandler func(message sabuhp.Message, socket *SSEClient) error
 
 type SSEHub struct {
 	maxRetries int
@@ -154,9 +154,9 @@ func (sc *SSEClient) Wait() {
 	sc.waiter.Wait()
 }
 
-func (sc *SSEClient) Send(method string, msg *sabuhp.Message, timeout time.Duration) error {
+func (sc *SSEClient) Send(method string, msg sabuhp.Message, timeout time.Duration) error {
 	var header = http.Header{}
-	for k, v := range msg.Meta.Headers {
+	for k, v := range msg.Headers {
 		header[k] = v
 	}
 
@@ -277,7 +277,7 @@ doLoop:
 				dataLine = bytes.TrimPrefix(dataLine, spaceBytes)
 
 				var messageErr error
-				var message *sabuhp.Message
+				var message sabuhp.Message
 				if contentType == sabuhp.MessageContentType {
 					message, messageErr = sc.codec.Decode(dataLine)
 					if messageErr != nil {
@@ -289,29 +289,25 @@ doLoop:
 							End()
 						continue doLoop
 					}
-					if len(message.Meta.Path) == 0 {
-						message.Meta.Path = sc.request.URL.Path
+					if len(message.Path) == 0 {
+						message.Path = sc.request.URL.Path
 					}
 				} else {
 					var payload = make([]byte, len(dataLine))
 					_ = copy(payload, dataLine)
 
-					message = &sabuhp.Message{
-						Topic: sc.request.URL.Path,
-						Id:    nxid.New(),
-						Type:  sabuhp.RequestReply,
-						Meta: sabuhp.MessageMeta{
-							Path:            sc.request.URL.Path,
-							ContentType:     contentType,
-							Query:           url.Values{},
-							Form:            url.Values{},
-							Headers:         sabuhp.Header{},
-							Cookies:         nil,
-							MultipartReader: nil,
-						},
-						Bytes:    payload,
-						Metadata: map[string]string{},
-						Params:   map[string]string{},
+					message = sabuhp.Message{
+						Topic:       sc.request.URL.Path,
+						Id:          nxid.New(),
+						Path:        sc.request.URL.Path,
+						ContentType: contentType,
+						Query:       url.Values{},
+						Form:        url.Values{},
+						Headers:     sabuhp.Header{},
+						Cookies:     nil,
+						Bytes:       payload,
+						Metadata:    map[string]string{},
+						Params:      map[string]string{},
 					}
 				}
 

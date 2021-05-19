@@ -92,7 +92,6 @@ func (htp *HttpServlet) HandleWithResponder(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleMessage implements necessary logic to handle an incoming request and response life cycle.
-//
 func (htp *HttpServlet) HandleMessage(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -152,6 +151,8 @@ func (htp *HttpServlet) HandleMessage(
 			Message("failed to send start http socket properly").
 			String("error", nerror.WrapOnly(startSocketErr).Error()).
 			End()
+
+		htp.streams.SocketClosed(socket)
 		return
 	}
 
@@ -177,6 +178,8 @@ func (htp *HttpServlet) HandleMessage(
 			Message("failed to flush message to transport").
 			String("error", nerror.WrapOnly(flushErr).Error()).
 			End()
+
+		htp.streams.SocketClosed(socket)
 		return
 	}
 
@@ -346,7 +349,7 @@ func (se *ServletSocket) Start() error {
 
 	var stack = njson.Log(se.logger)
 
-	var decodedMessages, decodedErr = se.decoder.Decode(se.req, se.params)
+	var decodedMessage, decodedErr = se.decoder.Decode(se.req, se.params)
 	if decodedErr != nil {
 		var statusCode int
 		if nerror.IsAny(decodedErr, sabuhp.BodyToLargeErr) {
@@ -381,16 +384,12 @@ func (se *ServletSocket) Start() error {
 
 	// if we have being scoped to specific event name, use that.
 	if se.asEvent != "" {
-		for _, dm := range decodedMessages {
-			dm.Topic = se.asEvent
-		}
+		decodedMessage.Topic = se.asEvent
 	}
-
-	atomic.AddInt64(&se.received, int64(len(decodedMessages)))
 
 	// overridingHandler overrides sending message to the manager
 	// by using provided TransportResponse to handle message.
-	var handleErr = se.handler(decodedMessages, se)
+	var handleErr = se.handler(decodedMessage, se)
 	if handleErr != nil {
 		stack.New().
 			Message("failed handle socket message").

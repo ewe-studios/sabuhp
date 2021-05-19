@@ -9,17 +9,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"github.com/influx6/npkg/nthen"
 	"github.com/influx6/npkg/nunsafe"
 
 	"github.com/ewe-studios/sabuhp/utils"
 	"github.com/influx6/npkg/njson"
 
 	"github.com/influx6/npkg/nxid"
-
-	"github.com/ewe-studios/sabuhp/managers"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -31,7 +27,7 @@ const (
 	ClientIdentificationHeader = "X-SSE-Client-Id"
 	LastEventIdListHeader      = "X-SSE-Last-Event-Ids"
 
-	eventHeader = "event: "
+	eventHeader = "event:"
 )
 
 var doubleLine = []byte("\n\n")
@@ -41,17 +37,16 @@ var _ sabuhp.Handler = (*SSEServer)(nil)
 func ManagedSSEServer(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	manager *managers.Manager,
 	optionalHeaders HeaderModifications,
 	codec sabuhp.Codec,
 ) *SSEServer {
 	return &SSEServer{
 		ctx:             ctx,
 		logger:          logger,
-		manager:         manager,
 		codec:           codec,
 		optionalHeaders: optionalHeaders,
 		sockets:         map[string]*SSESocket{},
+		streams:         sabuhp.NewSocketServers(),
 	}
 }
 
@@ -60,9 +55,13 @@ type SSEServer struct {
 	codec           sabuhp.Codec
 	optionalHeaders HeaderModifications
 	ctx             context.Context
-	manager         *managers.Manager
+	streams         *sabuhp.SocketServers
 	ssl             sync.RWMutex
 	sockets         map[string]*SSESocket
+}
+
+func (sse *SSEServer) Stream(server sabuhp.SocketService) {
+	sse.streams.Stream(server)
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -150,12 +149,6 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 	sse.ssl.RUnlock()
 
 	if !hasSocket {
-		stack.New().
-			LInfo().
-			Message("creating new sse socket for request").
-			String("client_id", clientId).
-			End()
-
 		var socket = NewSSESocket(
 			clientId,
 			sse.ctx,
@@ -164,7 +157,6 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			p,
 			sse.codec,
 			sse.logger,
-			sse.manager,
 			sse.optionalHeaders,
 		)
 
@@ -173,6 +165,8 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 			Message("starting sse socket").
 			String("client_id", clientId).
 			End()
+
+		sse.streams.SocketOpened(socket)
 
 		if startSocketErr := socket.Start(); startSocketErr != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -193,6 +187,8 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 				Message("failed to send message on transport").
 				String("error", nerror.WrapOnly(startSocketErr).Error()).
 				End()
+
+			sse.streams.SocketClosed(socket)
 			return
 		}
 
@@ -206,41 +202,10 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		sse.sockets[clientId] = socket
 		sse.ssl.Unlock()
 
-		stack.New().
-			LInfo().
-			Message("added sse socket client into registry").
-			String("client_id", clientId).
-			End()
-
-		stack.New().
-			LInfo().
-			Message("inform manager for new socket").
-			String("client_id", clientId).
-			End()
-
-		sse.manager.ManageSocketOpened(socket)
-
-		stack.New().
-			LInfo().
-			Message("informed manager for new socket").
-			String("client_id", clientId).
-			End()
-
-		stack.New().
-			LInfo().
-			Message("await socket closure").
-			String("client_id", clientId).
-			End()
-
 		socket.Wait()
 
-		sse.manager.ManageSocketClosed(socket)
+		sse.streams.SocketClosed(socket)
 
-		stack.New().
-			LInfo().
-			Message("socket sse closed by connection").
-			String("client_id", clientId).
-			End()
 		return
 	}
 
@@ -250,63 +215,7 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		String("client_id", clientId).
 		End()
 
-	var buffer bytes.Buffer
-	if _, terr := io.Copy(&buffer, r.Body); terr != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		if err := utils.CreateError(
-			w,
-			terr,
-			"Failed to read request body",
-			http.StatusBadRequest,
-		); err != nil {
-			stack.New().
-				LError().
-				Message("failed to read request body").
-				String("error", nerror.WrapOnly(terr).Error()).
-				End()
-		}
-
-		stack.New().
-			LError().
-			Message("failed to read request body").
-			String("error", nerror.WrapOnly(terr).Error()).
-			End()
-		return
-	}
-
-	stack.New().
-		LInfo().
-		Message("copied request from body").
-		String("client_id", clientId).
-		Bytes("message", buffer.Bytes()).
-		End()
-
-	var wrappedPayload, wrappedPayloadErr = sse.codec.Decode(buffer.Bytes())
-	if wrappedPayloadErr != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		var wrappedErr = nerror.WrapOnly(wrappedPayloadErr)
-		if err := utils.CreateError(
-			w,
-			wrappedPayloadErr,
-			"Failed to read request body",
-			http.StatusBadRequest,
-		); err != nil {
-			stack.New().
-				LError().
-				Message("failed to read request body").
-				Error("error", wrappedErr).
-				End()
-		}
-
-		stack.New().
-			LError().
-			Message("failed to read request body").
-			Error("error", wrappedErr).
-			End()
-		return
-	}
-
-	if deliveryErr := existingSocket.Publish(wrappedPayload, 0); deliveryErr != nil {
+	if deliveryErr := existingSocket.readRequest(r); deliveryErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		if err := utils.CreateError(
 			w,
@@ -333,7 +242,6 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 		LInfo().
 		Message("delivered message to sse socket").
 		String("client_id", clientId).
-		Bytes("message", buffer.Bytes()).
 		End()
 
 	w.WriteHeader(http.StatusNoContent)
@@ -351,11 +259,12 @@ type SSESocket struct {
 	res        http.ResponseWriter
 	params     sabuhp.Params
 	codec      sabuhp.Codec
-	sentMsgs   chan sseSend
+	handlers   *sabuhp.Sock
+	flusher    http.Flusher
+	sentMsgs   chan *sabuhp.Message
 	rcvMsgs    chan *sabuhp.Message
 	ctx        context.Context
 	canceler   context.CancelFunc
-	manager    *managers.Manager
 	waiter     sync.WaitGroup
 	headers    HeaderModifications
 	remoteAddr net.Addr
@@ -374,7 +283,6 @@ func NewSSESocket(
 	params sabuhp.Params,
 	codec sabuhp.Codec,
 	logger sabuhp.Logger,
-	manager *managers.Manager,
 	optionalHeaders HeaderModifications,
 ) *SSESocket {
 	var newCtx, newCanceler = context.WithCancel(ctx)
@@ -384,7 +292,6 @@ func NewSSESocket(
 		logger:   logger,
 		clientId: clientId,
 		ctx:      newCtx,
-		manager:  manager,
 		params:   params,
 		codec:    codec,
 		remoteAddr: &sseAddr{
@@ -396,10 +303,9 @@ func NewSSESocket(
 			addr:    r.Host,
 		},
 		xid:      nxid.New(),
-		headers:  optionalHeaders,
 		canceler: newCanceler,
-		sentMsgs: make(chan sseSend),
-		rcvMsgs:  make(chan *sabuhp.Message),
+		headers:  optionalHeaders,
+		handlers: sabuhp.NewSocketHandlers(nil),
 	}
 }
 
@@ -439,53 +345,14 @@ func (se *SSESocket) LocalAddr() net.Addr {
 	return se.localAddr
 }
 
-type sseSend struct {
-	Message *sabuhp.Message
-	Future  *nthen.Future
+func (se *SSESocket) Send(messages ...sabuhp.Message) {
+	for _, msg := range messages {
+		se.sendWrite(msg)
+	}
 }
 
-func (se *SSESocket) Send(msg *sabuhp.Message) *nthen.Future {
-	var ft = nthen.NewFuture()
-
-	var timeoutChan <-chan time.Time
-	if msg.Within > 0 {
-		timeoutChan = time.After(msg.Within)
-	}
-	var reqCtx = se.req.Context()
-	select {
-	case se.sentMsgs <- sseSend{
-		Message: msg,
-		Future:  ft,
-	}:
-		ft.WithValue(nil)
-	case <-timeoutChan: // nil channel will be ignored
-		ft.WithError(nerror.New("message delivery timeout"))
-	case <-reqCtx.Done():
-		ft.WithError(nerror.WrapOnly(reqCtx.Err()))
-	case <-se.ctx.Done():
-		ft.WithError(nerror.WrapOnly(se.ctx.Err()))
-	}
-
-	return ft
-}
-
-func (se *SSESocket) Publish(msg *sabuhp.Message, timeout time.Duration) error {
-	var timeoutChan <-chan time.Time
-	if timeout > 0 {
-		timeoutChan = time.After(timeout)
-	}
-
-	var reqCtx = se.req.Context()
-	select {
-	case se.rcvMsgs <- msg:
-		return nil
-	case <-timeoutChan: // nil channel will be ignored
-		return nerror.New("message delivery timeout")
-	case <-reqCtx.Done():
-		return nerror.WrapOnly(reqCtx.Err())
-	case <-se.ctx.Done():
-		return nerror.WrapOnly(se.ctx.Err())
-	}
+func (se *SSESocket) Listen(handler sabuhp.SocketMessageHandler) {
+	se.handlers.Use(handler)
 }
 
 func (se *SSESocket) Wait() {
@@ -496,12 +363,104 @@ func (se *SSESocket) Stop() {
 	se.canceler()
 }
 
+func (se *SSESocket) readRequest(req *http.Request) error {
+	var stack = njson.Log(se.logger)
+
+	stack.New().
+		LInfo().
+		Message("about to read request body").
+		End()
+
+	var buffer bytes.Buffer
+	if _, terr := io.Copy(&buffer, req.Body); terr != nil {
+		se.res.WriteHeader(http.StatusBadRequest)
+		if err := utils.CreateError(
+			se.res,
+			terr,
+			"Failed to read request body",
+			http.StatusBadRequest,
+		); err != nil {
+			stack.New().
+				LError().
+				Message("failed to read request body").
+				String("error", nerror.WrapOnly(terr).Error()).
+				End()
+		}
+
+		return nerror.WrapOnly(terr)
+	}
+
+	stack.New().
+		LInfo().
+		Message("read request body").
+		Int("body_size", buffer.Len()).
+		End()
+
+	if buffer.Len() == 0 {
+		return nil
+	}
+
+	stack.New().
+		LInfo().
+		Message("decode request body").
+		Int("body_size", buffer.Len()).
+		End()
+
+	var wrappedPayload, wrappedPayloadErr = se.codec.Decode(buffer.Bytes())
+	if wrappedPayloadErr != nil {
+		se.res.WriteHeader(http.StatusBadRequest)
+		var wrappedErr = nerror.WrapOnly(wrappedPayloadErr)
+
+		if err := utils.CreateError(
+			se.res,
+			wrappedPayloadErr,
+			"Failed to read request body",
+			http.StatusBadRequest,
+		); err != nil {
+			stack.New().
+				LError().
+				Message("failed to read request body").
+				Error("error", wrappedErr).
+				End()
+		}
+
+		return nerror.WrapOnly(wrappedErr)
+	}
+
+	stack.New().
+		LInfo().
+		Message("notify handler with decoded request body").
+		Int("body_size", buffer.Len()).
+		End()
+
+	if deliveryErr := se.handlers.Notify(wrappedPayload, se); deliveryErr != nil {
+		se.res.WriteHeader(http.StatusInternalServerError)
+		if err := utils.CreateError(
+			se.res,
+			deliveryErr,
+			"Failed to send request body",
+			http.StatusInternalServerError,
+		); err != nil {
+			stack.New().
+				LError().
+				Message("failed to write delivery error to response").
+				String("error", nerror.WrapOnly(deliveryErr).Error()).
+				End()
+			return err
+		}
+		return nil
+	}
+	return nil
+}
+
 func (se *SSESocket) Start() error {
 	// get response flusher
 	var flusher, isFlusher = se.res.(http.Flusher)
 	if !isFlusher {
 		return nerror.New("ResponseWriter object is not a http.Flusher")
 	}
+
+	se.flusher = flusher
 
 	se.res.WriteHeader(http.StatusOK)
 
@@ -517,91 +476,33 @@ func (se *SSESocket) Start() error {
 		se.headers(se.res.Header())
 	}
 
-	se.waiter.Add(2)
-	go se.manageReads()
-	go se.manageWrites(flusher)
+	if err := se.readRequest(se.req); err != nil {
+		return nerror.WrapOnly(err)
+	}
 
+	se.flusher.Flush()
+
+	se.waiter.Add(1)
+	go func() {
+		<-se.ctx.Done()
+		se.waiter.Done()
+	}()
 	return nil
 }
 
-func (se *SSESocket) manageReads() {
-	defer se.waiter.Done()
-
-	var requestContext = se.req.Context()
-
-	var stack = njson.Log(se.logger)
-
-doLoop:
-	for {
-		select {
-		case <-requestContext.Done():
-			break doLoop
-		case <-se.ctx.Done():
-			break doLoop
-		case msg := <-se.rcvMsgs:
-			atomic.AddInt64(&se.received, 1)
-			stack.New().
-				LInfo().
-				Message("received new data from client").
-				Object("message", msg).
-				End()
-
-			if handleErr := se.manager.HandleSocketMessage(msg, se); handleErr != nil {
-				stack.New().
-					Message("failed handle socket message").
-					String("error", nerror.WrapOnly(handleErr).Error()).
-					End()
-			}
-		}
-	}
-}
-
-func (se *SSESocket) manageWrites(flusher http.Flusher) {
-	defer se.waiter.Done()
-
-	var stack = njson.Log(se.logger)
-
-	var requestContext = se.req.Context()
-
-	flusher.Flush()
-
-doLoop:
-	for {
-		select {
-		case <-requestContext.Done():
-			break doLoop
-		case <-se.ctx.Done():
-			break doLoop
-		case msg := <-se.sentMsgs:
-			atomic.AddInt64(&se.sent, 1)
-
-			if err := se.sendWrite(msg.Message); err != nil {
-				msg.Future.WithError(err)
-				stack.New().
-					LError().
-					Message("write failed").
-					String("error", err.Error()).
-					End()
-			}
-
-			// flush content into response writer.
-			flusher.Flush()
-
-			msg.Future.WithValue(nil)
-		}
-	}
-}
-
-func (se *SSESocket) sendWrite(msg *sabuhp.Message) error {
+func (se *SSESocket) sendWrite(msg sabuhp.Message) {
 	var encodedMessage, encodeErr = se.codec.Encode(msg)
 	if encodeErr != nil {
-		return nerror.WrapOnly(encodeErr)
+		if msg.Future != nil {
+			msg.Future.WithError(nerror.WrapOnly(encodeErr))
+		}
+		return
 	}
 
 	var builder strings.Builder
 	builder.Reset()
 	builder.WriteString("event: ")
-	builder.WriteString(msg.Meta.ContentType)
+	builder.WriteString(msg.ContentType)
 	builder.WriteString("\n")
 	builder.WriteString("data: ")
 	builder.Write(encodedMessage)
@@ -622,7 +523,15 @@ func (se *SSESocket) sendWrite(msg *sabuhp.Message) error {
 			String("error", nerror.WrapOnly(writeErr).Error()).
 			Int("written", sentCount).
 			End()
-		return writeErr
+		if msg.Future != nil {
+			msg.Future.WithError(nerror.WrapOnly(writeErr))
+		}
+		return
 	}
-	return nil
+
+	se.flusher.Flush()
+
+	if msg.Future != nil {
+		msg.Future.WithValue(nil)
+	}
 }
