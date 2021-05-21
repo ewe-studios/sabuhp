@@ -11,7 +11,7 @@ type Sock struct {
 	handler SocketMessageHandler
 }
 
-func NewSocketHandlers(handler SocketMessageHandler) *Sock {
+func NewSock(handler SocketMessageHandler) *Sock {
 	return &Sock{handler: handler}
 }
 

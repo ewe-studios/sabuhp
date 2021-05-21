@@ -305,7 +305,7 @@ func NewSSESocket(
 		xid:      nxid.New(),
 		canceler: newCanceler,
 		headers:  optionalHeaders,
-		handlers: sabuhp.NewSocketHandlers(nil),
+		handlers: sabuhp.NewSock(nil),
 	}
 }
 
