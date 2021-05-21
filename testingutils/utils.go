@@ -10,16 +10,17 @@ import (
 )
 
 type SubChannel struct {
-	topic string
-	gp    string
+	T       string
+	G       string
+	Handler sabuhp.TransportResponse
 }
 
 func (s SubChannel) Topic() string {
-	return s.topic
+	return s.T
 }
 
 func (s SubChannel) Group() string {
-	return s.gp
+	return s.G
 }
 
 func (s SubChannel) Close() {

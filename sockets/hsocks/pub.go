@@ -32,8 +32,10 @@ func ManagedHttpServlet(
 	decoder sabuhp.HttpDecoder,
 	encoder sabuhp.HttpEncoder,
 	optionalHeaders sabuhp.HeaderModifications,
+	bus sabuhp.MessageBus,
 ) *HttpServlet {
 	return &HttpServlet{
+		bus:       bus,
 		ctx:       ctx,
 		logger:    logger,
 		encoder:   encoder,
@@ -50,6 +52,11 @@ type HttpServlet struct {
 	headerMod sabuhp.HeaderModifications
 	ctx       context.Context
 	streams   *sabuhp.SocketServers
+	bus       sabuhp.MessageBus
+}
+
+func (htp *HttpServlet) Bus(bus sabuhp.MessageBus) {
+	htp.bus = bus
 }
 
 func (htp *HttpServlet) Stream(server sabuhp.SocketService) {

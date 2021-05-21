@@ -20,7 +20,7 @@ type Job struct {
 	To        string
 	DI        *injectors.Injector
 	Msg       *sabuhp.Message
-	Transport sabuhp.MessageBus
+	Transport sabuhp.Transport
 }
 
 type ActionFunc func(ctx context.Context, job Job)
@@ -44,6 +44,8 @@ type SlaveWorkerRequest struct {
 	// where the PubSubAddress has no value is the
 	// topic to listen for commands on.
 	ActionName string
+
+	GroupName string
 
 	// WorkerCreator is the creation function which will be supplied
 	// the initial WorkerConfig which should be populated accordingly
@@ -79,7 +81,7 @@ type WorkerRequest struct {
 
 	// ActionName represent the action name for this
 	// request work group, which identifiers in cases
-	// where the PubSubAddress has no value is the
+	// where the PubSubTopic has no value is the
 	// topic to listen for commands on.
 	ActionName string
 
@@ -87,6 +89,10 @@ type WorkerRequest struct {
 	// a specific unique topic to this action worker, where
 	// commands for these are piped accordingly.
 	PubSubTopic string
+
+	// PubSubGroup indicates the target group for which the
+	// action will be added into. Similar to a Kafka ConsumerGroup.
+	PubSubGroup string
 
 	// WorkerCreator is the creation function which will be supplied
 	// the initial WorkerConfig which should be populated accordingly
@@ -390,8 +396,8 @@ func (ah *ActionHub) createAutoActionWorkers() {
 
 func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 	var logger = ah.Logger
-	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, sabuhp.TransportResponseFunc(
-		func(data *sabuhp.Message, sub sabuhp.MessageBus) sabuhp.MessageErr {
+	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(
+		func(data sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 
 			// get or create worker group for request topic
 			var workerGroup *MasterWorkerGroup
@@ -407,7 +413,7 @@ func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 				return sabuhp.WrapErr(nerror.New("worker group not found"), false)
 			}
 
-			if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
+			if err := workerGroup.Master.HandleMessage(data, tr); err != nil {
 				logger.Log(njson.JSONB(func(event npkg.Encoder) {
 					event.String("error", err.Error())
 					event.Int("_level", int(npkg.ERROR))
@@ -434,7 +440,7 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 
 	var logger = ah.Logger
 	var workerGroup = ah.createMasterGroup(req)
-	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.MessageBus) sabuhp.MessageErr {
+	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(func(data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
 		if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
@@ -475,7 +481,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	var slaveWorkerGroup = NewWorkGroup(workerConfig)
 	masterGroup.Slaves[slaveName] = slaveWorkerGroup
 
-	var workerChannel = ah.Pubsub.Listen(slaveName, sabuhp.TransportResponseFunc(func(data *sabuhp.Message, sub sabuhp.MessageBus) sabuhp.MessageErr {
+	var workerChannel = ah.Pubsub.Listen(slaveName, req.GroupName, sabuhp.TransportResponseFunc(func(data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
 		if err := slaveWorkerGroup.HandleMessage(data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.Int("_level", int(npkg.ERROR))

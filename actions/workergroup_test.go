@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ewe-studios/sabuhp/injectors"
-	"github.com/ewe-studios/sabuhp/testingutils"
 
 	"github.com/ewe-studios/sabuhp"
 
@@ -15,7 +14,7 @@ import (
 )
 
 var testName = "test_action"
-var transport = &testingutils.NoPubSub{}
+var transport = sabuhp.Transport{Bus: &sabuhp.BusBuilder{}}
 var injector = injectors.NewInjector()
 
 func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) WorkerConfig { //nolint:lll
@@ -56,7 +55,7 @@ func TestNewWorkGroup(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(&sabuhp.Message{
+		require.NoError(t, group.HandleMessage(sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Bytes:    textPayload,
@@ -105,7 +104,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(&sabuhp.Message{
+		require.NoError(t, group.HandleMessage(sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Bytes:    textPayload,
@@ -156,7 +155,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	<-time.After(time.Second / 2)
 
 	var textPayload = []byte("Welcome to life")
-	var msg = &sabuhp.Message{
+	var msg = sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Bytes:    textPayload,
@@ -206,7 +205,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 
 	<-time.After(time.Second / 2)
 	var textPayload = []byte("Welcome to life")
-	require.NoError(t, group.HandleMessage(&sabuhp.Message{
+	require.NoError(t, group.HandleMessage(sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Bytes:    textPayload,

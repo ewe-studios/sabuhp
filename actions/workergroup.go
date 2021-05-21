@@ -151,7 +151,7 @@ func (wc *WorkerConfig) ensure() {
 
 type WorkRequest struct {
 	Message   *sabuhp.Message
-	Transport sabuhp.MessageBus
+	Transport sabuhp.Transport
 }
 
 // WorkerGroup embodies a small action based workgroup which at their default
@@ -313,7 +313,7 @@ func (w *WorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.MessageBus) error {
+func (w *WorkerGroup) HandleMessage(message sabuhp.Message, t sabuhp.Transport) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -321,7 +321,7 @@ func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.MessageBus
 	select {
 	case <-w.context.Done():
 	case w.jobs <- WorkRequest{
-		Message:   message,
+		Message:   &message,
 		Transport: t,
 	}:
 		return nil
@@ -340,7 +340,7 @@ func (w *WorkerGroup) HandleMessage(message *sabuhp.Message, t sabuhp.MessageBus
 	case <-w.context.Done():
 		return nerror.New("failed to handle message from %q", w.config.ActionName)
 	case w.jobs <- WorkRequest{
-		Message:   message,
+		Message:   &message,
 		Transport: t,
 	}:
 		return nil

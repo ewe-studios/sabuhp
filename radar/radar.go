@@ -15,6 +15,7 @@ import (
 
 type MuxConfig struct {
 	RootPath string
+	Bus      sabuhp.MessageBus
 	Logger   sabuhp.Logger
 	NotFound sabuhp.Handler
 	Relay    *sabuhp.PbRelay
@@ -57,6 +58,7 @@ func NewMux(config MuxConfig) *Mux {
 			config.Decoder,
 			config.Encoder,
 			config.Headers,
+			config.Bus,
 		),
 	}
 }
@@ -108,9 +110,11 @@ func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b []sabuhp.Message, from sabuhp.Socket) error {
-					muxHandler.Handle()
-					return nil
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
+					return muxHandler.Handle(b, sabuhp.Transport{
+						Bus:    m.config.Bus,
+						Socket: from,
+					})
 				})
 			},
 		),
@@ -137,7 +141,12 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, muxHandler)
+				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabuhp.Message, from sabuhp.Socket) error {
+					return muxHandler.Handle(b, sabuhp.Transport{
+						Bus:    m.config.Bus,
+						Socket: from,
+					})
+				})
 			},
 		),
 	))
@@ -169,7 +178,12 @@ func (m *Mux) Service(eventName string, grp string, route string, handler sabuhp
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, muxHandler)
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
+					return muxHandler.Handle(b, sabuhp.Transport{
+						Bus:    m.config.Bus,
+						Socket: from,
+					})
+				})
 			},
 		),
 	))
@@ -194,7 +208,10 @@ func (m *Mux) RedirectAsPath(route string, methods ...string) {
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, nil)
+				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabuhp.Message, from sabuhp.Socket) error {
+					m.config.Bus.Send(b)
+					return nil
+				})
 			},
 		),
 	))
@@ -216,7 +233,10 @@ func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, nil)
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
+					m.config.Bus.Send(b)
+					return nil
+				})
 			},
 		),
 	))
@@ -230,9 +250,9 @@ func (m *Mux) Match(msg *sabuhp.Message) bool {
 	return handler != nil
 }
 
-func (m *Mux) ServeWithMatchers(msg *sabuhp.Message, tr sabuhp.MessageBus) sabuhp.MessageErr {
+func (m *Mux) ServeWithMatchers(msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	for _, h := range m.subRoutes {
-		if h.Match(msg) {
+		if h.Match(&msg) {
 			return h.Handle(msg, tr)
 		}
 	}
