@@ -81,7 +81,12 @@ func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods 
 	cs.Bus = bus
 	cs.Logger = logger
 	cs.Injector = injectors.NewInjector()
-	cs.Ctx, cs.CancelFunc = context.WithCancel(ctx)
+
+	var errCtx context.Context
+	cs.ErrGroup, errCtx = errgroup.WithContext(ctx)
+
+	cs.Logger = logger
+	cs.Ctx, cs.CancelFunc = context.WithCancel(errCtx)
 	cs.BusRelay = sabuhp.NewBusRelay(cs.Ctx, cs.Logger, cs.Bus)
 
 	for _, mod := range mods {
@@ -91,8 +96,20 @@ func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods 
 	return cs
 }
 
-func (c *ServiceServer) Start() {
+// Init allows you to initialize all components for setup as
+// calling ServiceServer.Start with both initialize and start all
+// related servers.
+//
+// If you wish to use the default setup but customize to fit your needs
+// it's your best interest to call ServiceServer.Init first.
+func (c *ServiceServer) Init() {
 	c.initer.Do(c.initializeComponents)
+}
+
+// Start calls ServiceServer.Init first then starts all related servers (http, websocket)
+// etc.
+func (c *ServiceServer) Start() {
+	c.Init()
 
 	// start web socket server
 	c.Workers.Start()
