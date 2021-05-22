@@ -41,6 +41,6 @@ func main() {
 	waiter.Wait()
 
 	if err := cs.ErrGroup.Wait(); err != nil {
-		log.Fatalf("service group finished with error: %+q", err.Error())
+		log.Fatalf("service group finished with error: %+s", err.Error())
 	}
 }
