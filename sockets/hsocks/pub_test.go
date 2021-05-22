@@ -60,7 +60,7 @@ func TestNewHub(t *testing.T) {
 		controlCtx,
 		logger,
 		sabuhp.NewHttpDecoderImpl(codec, logger, -1),
-		sabuhp.NewHttpCodec(codec, logger),
+		sabuhp.NewHttpEncoderImpl(codec, logger),
 		nil,
 		&mb,
 	)

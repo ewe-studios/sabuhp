@@ -12,18 +12,24 @@ import (
 	"github.com/influx6/npkg/nxid"
 )
 
-var _ HttpEncoder = (*HttpCodec)(nil)
+var _ HttpEncoder = (*HttpEncoderImpl)(nil)
 
-type HttpCodec struct {
+// HttpEncoder transforms a message into an appropriate response
+// to an http response object.
+type HttpEncoder interface {
+	Encode(req http.ResponseWriter, message Message) error
+}
+
+type HttpEncoderImpl struct {
 	Codec  Codec
 	Logger Logger
 }
 
-func NewHttpCodec(codec Codec, logger Logger) *HttpCodec {
-	return &HttpCodec{Codec: codec, Logger: logger}
+func NewHttpEncoderImpl(codec Codec, logger Logger) *HttpEncoderImpl {
+	return &HttpEncoderImpl{Codec: codec, Logger: logger}
 }
 
-func (r *HttpCodec) Encode(res http.ResponseWriter, m Message) error {
+func (r *HttpEncoderImpl) Encode(res http.ResponseWriter, m Message) error {
 	var stack = njson.Log(r.Logger)
 
 	// if the content type is not MessageContentType ("application/x-event-message")
@@ -94,12 +100,6 @@ type HeaderModifications func(header http.Header)
 // delivered.
 type HttpDecoder interface {
 	Decode(req *http.Request, params Params) (Message, error)
-}
-
-// HttpEncoder transforms a message into an appropriate response
-// to an http response object.
-type HttpEncoder interface {
-	Encode(req http.ResponseWriter, message Message) error
 }
 
 type HttpDecoderImpl struct {

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ewe-studios/sabuhp/codecs"
+
 	"github.com/influx6/npkg/nerror"
 
 	"github.com/ewe-studios/websocket"
@@ -32,7 +34,8 @@ const (
 )
 
 var (
-	upgrader = &websocket.Upgrader{
+	DefaultCodec = &codecs.MessagePackCodec{}
+	upgrader     = &websocket.Upgrader{
 		HandshakeTimeout:  time.Second * 5,
 		ReadBufferSize:    gorillapub.DefaultMaxMessageSize,
 		WriteBufferSize:   gorillapub.DefaultMaxMessageSize,
@@ -72,7 +75,19 @@ func WithWebsocketServer(this *gorillapub.GorillaHub) Mod {
 	}
 }
 
-func WithWebsocketHeader(this gorillapub.CustomHeader) Mod {
+func WithWebsocketConfigCreator(this gorillapub.ConfigCreator) Mod {
+	return func(cs *ClientServer) {
+		cs.WebsocketConf = this
+	}
+}
+
+func WithHeaderMod(this sabuhp.HeaderModifications) Mod {
+	return func(cs *ClientServer) {
+		cs.HeaderMod = this
+	}
+}
+
+func WithWebsocketHeader(this gorillapub.ResponseHeadersFromRequest) Mod {
 	return func(cs *ClientServer) {
 		cs.WebsocketHeader = this
 	}
@@ -123,7 +138,9 @@ type ClientServer struct {
 	Encoder         sabuhp.HttpEncoder
 	HttpServlet     *hsocks.HttpServlet
 	Upgrader        *websocket.Upgrader
-	WebsocketHeader gorillapub.CustomHeader
+	HeaderMod       sabuhp.HeaderModifications
+	WebsocketConf   gorillapub.ConfigCreator
+	WebsocketHeader gorillapub.ResponseHeadersFromRequest
 	WebsocketServer *gorillapub.GorillaHub
 	StreamBinder    *sabuhp.StreamBusRelay
 }
@@ -146,8 +163,20 @@ func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods 
 	return cs
 }
 
-func (c *ClientServer) Start() {
+// Init allows you to initialize all components for setup as
+// calling ClientServer.Start with both initialize and start all
+// related servers.
+//
+// If you wish to use the default setup but customize to fit your needs
+// it's your best interest to call ClientServer.Init first.
+func (c *ClientServer) Init() {
 	c.initer.Do(c.initializeComponents)
+}
+
+// Start calls ClientServer.Init first then starts all related servers (http, websocket)
+// etc.
+func (c *ClientServer) Start() {
+	c.Init()
 
 	// start up http server
 	c.ErrGroup.Go(func() error {
@@ -169,21 +198,76 @@ func (c *ClientServer) Start() {
 	})
 }
 
+// Wait will block till all services are closed and existed included created
+// goroutines. You can confident use wait to block and know that once done
+// there is zero chances of goroutine or memory leak as regards started resources.
 func (c *ClientServer) Wait() error {
 	return c.ErrGroup.Wait()
 }
 
+func (c *ClientServer) notFoundHandler(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
+	var logStack = njson.Log(c.Logger)
+
+	logStack.New().
+		LDebug().
+		Message("received non registered route request").
+		String("host_addr", request.Host).
+		String("remote_addr", request.RemoteAddr).
+		String("method", request.Method).
+		String("path", request.URL.Path).
+		String("uri", request.URL.String()).
+		End()
+
+	http.NotFound(writer, request)
+
+	logStack.New().
+		LDebug().
+		Message("sent http not found response").
+		String("host_addr", request.Host).
+		String("remote_addr", request.RemoteAddr).
+		String("method", request.Method).
+		String("path", request.URL.Path).
+		String("uri", request.URL.String()).
+		End()
+}
+
 func (c *ClientServer) initializeComponents() {
 	if c.Encoder == nil {
-		panic("ClientServer.Encoder is required")
+		c.Encoder = sabuhp.NewHttpEncoderImpl(DefaultCodec, c.Logger)
 	}
 
 	if c.Decoder == nil {
-		panic("ClientServer.Decoder is required")
+		c.Decoder = sabuhp.NewHttpDecoderImpl(DefaultCodec, c.Logger, DefaultMaxSize)
 	}
 
 	if c.Mux == nil {
-		panic("ClientServer.Mux is required")
+		c.Mux = radar.NewMux(radar.MuxConfig{
+			RootPath: "",
+			Bus:      c.Bus,
+			Logger:   c.Logger,
+			Relay:    c.BusRelay,
+			Ctx:      c.Ctx,
+			Decoder:  c.Decoder,
+			Encoder:  c.Encoder,
+			Headers:  nil,
+			NotFound: sabuhp.HandlerFunc(c.notFoundHandler),
+		})
+	}
+
+	if c.HttpServlet == nil {
+		c.HttpServlet = hsocks.ManagedHttpServlet(c.Ctx, c.Logger, c.Decoder, c.Encoder, c.HeaderMod, c.Bus)
+	}
+
+	if c.SSEServer == nil {
+		c.SSEServer = ssepub.ManagedSSEServer(c.Ctx, c.Logger, c.HeaderMod, DefaultCodec)
+	}
+
+	if c.WebsocketServer == nil {
+		c.WebsocketServer = gorillapub.ManagedGorillaHub(c.Ctx, c.Logger, c.WebsocketConf, DefaultCodec)
+	}
+
+	if c.HttpServer == nil {
+		c.HttpServer = serverpub.NewServer(c.Mux, time.Minute)
 	}
 
 	c.HttpServer.ReadyFunc = c.readyServer

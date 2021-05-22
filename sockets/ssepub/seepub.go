@@ -37,7 +37,7 @@ var _ sabuhp.Handler = (*SSEServer)(nil)
 func ManagedSSEServer(
 	ctx context.Context,
 	logger sabuhp.Logger,
-	optionalHeaders HeaderModifications,
+	optionalHeaders sabuhp.HeaderModifications,
 	codec sabuhp.Codec,
 ) *SSEServer {
 	return &SSEServer{
@@ -53,7 +53,7 @@ func ManagedSSEServer(
 type SSEServer struct {
 	logger          sabuhp.Logger
 	codec           sabuhp.Codec
-	optionalHeaders HeaderModifications
+	optionalHeaders sabuhp.HeaderModifications
 	ctx             context.Context
 	streams         *sabuhp.SocketServers
 	ssl             sync.RWMutex
@@ -249,8 +249,6 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 
 var _ sabuhp.Socket = (*SSESocket)(nil)
 
-type HeaderModifications func(header http.Header)
-
 type SSESocket struct {
 	clientId   string
 	xid        nxid.ID
@@ -266,7 +264,7 @@ type SSESocket struct {
 	ctx        context.Context
 	canceler   context.CancelFunc
 	waiter     sync.WaitGroup
-	headers    HeaderModifications
+	headers    sabuhp.HeaderModifications
 	remoteAddr net.Addr
 	localAddr  net.Addr
 
@@ -283,7 +281,7 @@ func NewSSESocket(
 	params sabuhp.Params,
 	codec sabuhp.Codec,
 	logger sabuhp.Logger,
-	optionalHeaders HeaderModifications,
+	optionalHeaders sabuhp.HeaderModifications,
 ) *SSESocket {
 	var newCtx, newCanceler = context.WithCancel(ctx)
 	return &SSESocket{

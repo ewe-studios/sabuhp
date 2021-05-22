@@ -54,7 +54,7 @@ var (
 	websocketHeadMessage = []byte("Websocket Endpoint!\n")
 )
 
-type CustomHeader func(r *http.Request) http.Header
+type ResponseHeadersFromRequest func(r *http.Request) http.Header
 
 type SocketInfo struct {
 	Query   url.Values
@@ -66,7 +66,7 @@ func HttpUpgrader(
 	logger sabuhp.Logger,
 	hub *GorillaHub,
 	upgrader *websocket.Upgrader,
-	custom CustomHeader,
+	custom ResponseHeadersFromRequest,
 ) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		if strings.ToLower(request.Method) == "head" {
@@ -142,7 +142,7 @@ func UpgraderHandler(
 	logger sabuhp.Logger,
 	hub *GorillaHub,
 	upgrader *websocket.Upgrader,
-	custom CustomHeader,
+	custom ResponseHeadersFromRequest,
 ) sabuhp.Handler {
 	return sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
 		var customHeaders http.Header

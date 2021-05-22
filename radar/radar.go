@@ -18,7 +18,7 @@ type MuxConfig struct {
 	Bus      sabuhp.MessageBus
 	Logger   sabuhp.Logger
 	NotFound sabuhp.Handler
-	Relay    *sabuhp.PbRelay
+	Relay    *sabuhp.BusRelay
 	Ctx      context.Context
 	Decoder  sabuhp.HttpDecoder
 	Encoder  sabuhp.HttpEncoder
@@ -54,7 +54,7 @@ type Mux struct {
 	logger       sabuhp.Logger
 	NotFound     sabuhp.Handler
 	subRoutes    []sabuhp.MessageRouter
-	relay        *sabuhp.PbRelay
+	relay        *sabuhp.BusRelay
 	pre          sabuhp.Wrappers
 	preHttp      sabuhp.HttpWrappers
 	httpToEvents *hsocks.HttpServlet
