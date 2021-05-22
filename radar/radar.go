@@ -2,8 +2,11 @@ package radar
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/influx6/npkg/njson"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -307,6 +310,16 @@ func (m *Mux) AddPre(response sabuhp.Wrapper) {
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var params = sabuhp.Params{}
+
+	var stack = njson.Log(m.logger)
+	stack.New().
+		LInfo().
+		Message("creating new http request").
+		String("url", r.URL.String()).
+		String("path", r.URL.Path).
+		String("remote_addr", r.RemoteAddr).
+		String("headers", fmt.Sprintf("%+q", r.Header)).
+		End()
 
 	var reqPath = r.URL.Path
 	if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
