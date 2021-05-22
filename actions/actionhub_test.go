@@ -29,12 +29,14 @@ func TestNewActionHub_StartStop(t *testing.T) {
 	var injector = injectors.NewInjector()
 	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
+	var relay = sabuhp.NewBusRelay(ctx, logger, &mb)
 	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
 		templateRegistry,
 		injector,
 		&mb,
+		relay,
 		logger,
 	)
 
@@ -83,6 +85,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
+	var relay = sabuhp.NewBusRelay(ctx, logger, &mb)
 
 	var ack = make(chan struct{}, 1)
 	var injector = injectors.NewInjector()
@@ -99,6 +102,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		templateRegistry,
 		injector,
 		&mb,
+		relay,
 		logger,
 	)
 

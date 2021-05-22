@@ -44,6 +44,8 @@ func TestNewHub(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
 	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
 
+	var mb sabuhp.BusBuilder
+
 	var mx sabuhp.StreamFunc
 	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
 		fmt.Println("Received send request: ", b.Bytes, b.Topic)
@@ -60,6 +62,7 @@ func TestNewHub(t *testing.T) {
 		sabuhp.NewHttpDecoderImpl(codec, logger, -1),
 		sabuhp.NewHttpCodec(codec, logger),
 		nil,
+		&mb,
 	)
 	require.NotNil(t, servletServer)
 
@@ -67,7 +70,7 @@ func TestNewHub(t *testing.T) {
 
 	var httpServer = httptest.NewServer(servletServer)
 
-	var clientHub = NewHub(controlCtx, 5, codec, httpServer.Client(), logger, linearBackOff)
+	var clientHub = NewClientSockets(controlCtx, 5, codec, httpServer.Client(), logger, linearBackOff)
 
 	var socket, socketErr = clientHub.For(
 		nxid.New(),

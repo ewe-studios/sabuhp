@@ -2,6 +2,7 @@ package sabuhp
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 )
 
 type SocketNotification func(socket Socket)
-
 
 // PbRelay aka MultiSubscriberSingleTopicManager wraps a transport object
 // with a subscription management core that allows multiple subscribers listen to
@@ -48,7 +48,6 @@ func (tm *PbRelay) Handle(message Message, transport Transport) MessageErr {
 	tm.chl.RLock()
 	channels, hasChannel := tm.channels[message.Topic]
 	tm.chl.RUnlock()
-
 
 	if !hasChannel {
 		return WrapErr(nerror.New("no listeners for topic %q", message.Topic), false)
@@ -141,12 +140,12 @@ func (tm *PbRelay) Group(topic string, group string) *PbGroup {
 	var newCtx, canceler = context.WithCancel(tm.ctx)
 	var newChannel = &PbGroup{
 		topic:         topic,
-		group: group,
+		group:         group,
 		logger:        tm.logger,
 		commands:      make(chan func()),
 		ctx:           newCtx,
 		canceler:      canceler,
-		manager: tm,
+		manager:       tm,
 		subscriptions: map[nxid.ID]*subInfo{},
 	}
 
@@ -366,7 +365,7 @@ func (sc *PbGroup) add(info subInfo) error {
 	}
 }
 
-func (sc *PbGroup) Remove(id nxid.ID)  {
+func (sc *PbGroup) Remove(id nxid.ID) {
 	var info subInfo
 	info.id = id
 	info.sub = sc
@@ -508,4 +507,45 @@ loopHandler:
 			doAction()
 		}
 	}
+}
+
+type BusRelay struct {
+	Relay       *PbRelay
+	Bus         MessageBus
+	bl          sync.RWMutex
+	busChannels map[string]Channel
+}
+
+func BusWithRelay(relay *PbRelay, bus MessageBus) *BusRelay {
+	return &BusRelay{Bus: bus, Relay: relay}
+}
+
+func NewBusRelay(ctx context.Context, logger Logger, bus MessageBus) *BusRelay {
+	return &BusRelay{Bus: bus, Relay: NewPbRelay(ctx, logger)}
+}
+
+func (tm *BusRelay) Handle(message Message, transport Transport) MessageErr {
+	return tm.Relay.Handle(message, transport)
+}
+
+func (br *BusRelay) Group(topic string, grp string) *PbGroup {
+	var busTopic = fmt.Sprintf("%s:%s", topic, grp)
+
+	br.bl.RLock()
+	var busTopicChannel = br.busChannels[busTopic]
+	br.bl.RUnlock()
+
+	if busTopicChannel != nil {
+		return br.Relay.Group(topic, grp)
+	}
+
+	var busChannel = br.Bus.Listen(topic, grp, TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+		return br.Relay.Handle(message, transport)
+	}))
+
+	br.bl.Lock()
+	br.busChannels[busTopic] = busChannel
+	br.bl.Unlock()
+
+	return br.Relay.Group(topic, grp)
 }

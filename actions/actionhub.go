@@ -187,6 +187,7 @@ type EscalationNotification func(escalation Escalation, hub *ActionHub)
 // asynchronously, each responding with another message if needed.
 type ActionHub struct {
 	Pubsub         sabuhp.MessageBus
+	Relay          *sabuhp.BusRelay
 	Logger         sabuhp.Logger
 	Injector       *injectors.Injector
 	WorkRegistry   *WorkerTemplateRegistry
@@ -216,6 +217,7 @@ func NewActionHub(
 	templates *WorkerTemplateRegistry,
 	injector *injectors.Injector,
 	pubsub sabuhp.MessageBus,
+	relay *sabuhp.BusRelay,
 	logger sabuhp.Logger,
 ) *ActionHub {
 	var cntx, cancelFn = context.WithCancel(ctx)
@@ -225,6 +227,7 @@ func NewActionHub(
 		Logger:         logger,
 		CancelFn:       cancelFn,
 		Pubsub:         pubsub,
+		Relay:          relay,
 		WorkRegistry:   templates,
 		EscalationFunc: escalationHandler,
 	}

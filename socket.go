@@ -241,6 +241,125 @@ func (st *StreamBus) SocketBusSend(b Message, _ Socket) MessageErr {
 	return WrapErr(mb.Future.Err(), false)
 }
 
+type StreamBusRelay struct {
+	Logger   Logger
+	BusRelay *BusRelay
+	Bus      MessageBus
+}
+
+func NewStreamBusRelay(logger Logger, bus MessageBus, relay *BusRelay) *StreamBusRelay {
+	return &StreamBusRelay{Logger: logger, Bus: bus, BusRelay: relay}
+}
+
+// WithBusRelay returns the instance of a StreamBusRelay which will be connected to the provided SocketServer
+// and handle delivery of messages to a message bus and subscription to a target relay.
+func WithBusRelay(logger Logger, socketServer SocketServer, bus MessageBus, relay *BusRelay) *StreamBusRelay {
+	var stream = NewStreamBusRelay(logger, bus, relay)
+	socketServer.Stream(stream)
+	return stream
+}
+
+func (st *StreamBusRelay) SocketClosed(socket Socket) {
+	st.BusRelay.Relay.UnlistenAllWithId(socket.ID())
+}
+
+func (st *StreamBusRelay) SocketOpened(socket Socket) {
+	socket.Listen(func(message Message, from Socket) error {
+		if message.Topic == UNSUBSCRIBE {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
+					event.Int("_level", int(npkg.ERROR))
+					event.String("subscription_topic", message.SubscribeTo)
+					event.String("subscription_group", message.SubscribeGroup)
+					event.String("socket_id", from.ID().String())
+					event.Object("socket_stat", from.Stat())
+				}))
+			}
+			return st.SocketUnsubscribe(message, from)
+		}
+
+		if message.Topic == SUBSCRIBE {
+			if len(message.SubscribeTo) == 0 || len(message.SubscribeGroup) == 0 {
+				st.Logger.Log(njson.MJSON("failed to handle message for subscription without group or topic", func(event npkg.Encoder) {
+					event.Int("_level", int(npkg.ERROR))
+					event.String("subscription_topic", message.SubscribeTo)
+					event.String("subscription_group", message.SubscribeGroup)
+					event.String("socket_id", from.ID().String())
+					event.Object("socket_stat", from.Stat())
+				}))
+			}
+			return st.SocketSubscribe(message, from)
+		}
+
+		if err := st.SocketBusSend(message, from); err != nil {
+			st.Logger.Log(njson.MJSON("failed to handle message from from", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
+				event.Error("error", err)
+				event.String("socket_id", from.ID().String())
+				event.Object("socket_stat", from.Stat())
+			}))
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (st *StreamBusRelay) SocketSubscribe(b Message, socket Socket) MessageErr {
+	var group = st.BusRelay.Group(b.SubscribeTo, b.SubscribeGroup)
+	var channel = group.Listen(TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+		var ft = message.Future
+		if message.Future == nil {
+			ft = nthen.NewFuture()
+			message.Future = ft
+		}
+
+		socket.Send(message)
+		if sendErr := ft.Err(); sendErr != nil {
+			st.Logger.Log(njson.MJSON("failed to send ok message", func(event npkg.Encoder) {
+				event.Int("_level", int(npkg.ERROR))
+				event.String("error", sendErr.Error())
+				event.String("socket_id", socket.ID().String())
+				event.Object("socket_stat", socket.Stat())
+			}))
+
+			var unwrappedErr = nerror.UnwrapDeep(sendErr)
+			if unwrappedSendErr, ok := unwrappedErr.(MessageErr); ok {
+				return unwrappedSendErr
+			}
+			return WrapErr(sendErr, false)
+		}
+		return nil
+	}))
+	if b.Future != nil {
+		b.Future.WithValue(channel)
+	}
+	return nil
+}
+
+func (st *StreamBusRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr {
+	var group = st.BusRelay.Group(b.SubscribeTo, b.SubscribeGroup)
+	group.Remove(socket.ID())
+	if b.Future != nil {
+		b.Future.WithValue(nil)
+	}
+	return nil
+}
+
+func (st *StreamBusRelay) SocketBusSend(b Message, _ Socket) MessageErr {
+	var mb = &b
+	if mb.Future == nil {
+		mb.Future = nthen.NewFuture()
+	}
+
+	st.Bus.Send(b)
+	var itemErr = mb.Future.Err()
+	if itemErr != nil {
+		return WrapErr(mb.Future.Err(), false)
+	}
+	return nil
+}
+
 type StreamRelay struct {
 	Logger Logger
 	Relay  *PbRelay

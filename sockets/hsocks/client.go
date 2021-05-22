@@ -23,7 +23,7 @@ import (
 
 type MessageHandler func(message []byte, socket *SendClient) error
 
-type HttpHub struct {
+type ClientSockets struct {
 	maxRetries int
 	codec      sabuhp.Codec
 	retryFunc  sabuhp.RetryFunc
@@ -32,21 +32,21 @@ type HttpHub struct {
 	logging    sabuhp.Logger
 }
 
-func NewHub(
+func NewClientSockets(
 	ctx context.Context,
 	maxRetries int,
 	codec sabuhp.Codec,
 	client *http.Client,
 	logging sabuhp.Logger,
 	retryFn sabuhp.RetryFunc,
-) *HttpHub {
+) *ClientSockets {
 	if client.CheckRedirect == nil {
 		client.CheckRedirect = utils.CheckRedirect
 	}
-	return &HttpHub{ctx: ctx, codec: codec, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
+	return &ClientSockets{ctx: ctx, codec: codec, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
 }
 
-func (se *HttpHub) For(
+func (se *ClientSockets) For(
 	id nxid.ID,
 	route string,
 ) (*SendClient, error) {

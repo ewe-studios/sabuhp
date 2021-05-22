@@ -25,6 +25,24 @@ type MuxConfig struct {
 	Headers  sabuhp.HeaderModifications
 }
 
+func (mc *MuxConfig) validate() {
+	if mc.Logger == nil {
+		panic("MuxConfig.Logger is required")
+	}
+	if mc.Decoder == nil {
+		panic("MuxConfig.Decoder is required")
+	}
+	if mc.Encoder == nil {
+		panic("MuxConfig.Encoder is required")
+	}
+	if mc.Bus == nil {
+		panic("MuxConfig.Bus is required")
+	}
+	if mc.Relay == nil {
+		panic("MuxConfig.BusRelay is required")
+	}
+}
+
 // Mux is Request multiplexer.
 // It matches an event name or http url pattern to
 // a specific TransportHandler which will be registered
