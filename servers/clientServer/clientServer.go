@@ -24,7 +24,6 @@ import (
 	"github.com/ewe-studios/sabuhp/sockets/gorillapub"
 
 	"github.com/ewe-studios/sabuhp"
-	"github.com/ewe-studios/sabuhp/bus/redispub"
 	"github.com/ewe-studios/sabuhp/radar"
 )
 
@@ -88,26 +87,6 @@ func WithHttpDecoder(this sabuhp.HttpDecoder) Mod {
 func WithHttpEncoder(this sabuhp.HttpEncoder) Mod {
 	return func(cs *ClientServer) {
 		cs.Encoder = this
-	}
-}
-
-func WithRedisPubSub(config redispub.Config) Mod {
-	return func(cs *ClientServer) {
-		var redisBus, busErr = redispub.PubSub(config)
-		if busErr != nil {
-			panic(busErr)
-		}
-		cs.Bus = redisBus
-	}
-}
-
-func WithRedisStreams(config redispub.Config) Mod {
-	return func(cs *ClientServer) {
-		var redisBus, busErr = redispub.Stream(config)
-		if busErr != nil {
-			panic(busErr)
-		}
-		cs.Bus = redisBus
 	}
 }
 
@@ -195,6 +174,18 @@ func (c *ClientServer) Wait() error {
 }
 
 func (c *ClientServer) initializeComponents() {
+	if c.Encoder == nil {
+		panic("ClientServer.Encoder is required")
+	}
+
+	if c.Decoder == nil {
+		panic("ClientServer.Decoder is required")
+	}
+
+	if c.Mux == nil {
+		panic("ClientServer.Mux is required")
+	}
+
 	c.HttpServer.ReadyFunc = c.readyServer
 
 	if c.Upgrader == nil {
