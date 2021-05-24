@@ -256,7 +256,7 @@ Four options to solve optionally "inherition" of parent's middlewares but dismis
 
 - I could add options for "inherition" of middlewares inside the `Mux#Use` itself.
   But this is a problem because the end-dev will have to use a specific muxie's constant even if he doesn't care about the other option.
-- Create a new function like `UseOnly` or `UseExplicit`
+- CreateZone a new function like `UseOnly` or `UseExplicit`
   which will remove any previous middlewares and use only the new one.
   But this has a problem of making the `Use` func to act differently and debugging will be a bit difficult if big app if called after the `UseOnly`.
 - add a new func for creating new groups to remove any inherited middlewares from the parent.
