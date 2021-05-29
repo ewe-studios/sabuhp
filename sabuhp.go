@@ -152,6 +152,47 @@ type Transport struct {
 	Socket Socket
 }
 
+func (t Transport) ToBusElseSocket(msg ...Message) {
+	if t.Bus != nil {
+		t.Bus.Send(msg...)
+		return
+	}
+	if t.Socket == nil {
+		return
+	}
+	t.Socket.Send(msg...)
+}
+
+func (t Transport) ToSocketElseBus(msg ...Message) {
+	if t.Socket != nil {
+		t.Socket.Send(msg...)
+		return
+	}
+	if t.Bus == nil {
+		return
+	}
+	t.Bus.Send(msg...)
+}
+
+func (t Transport) ToBoth(msg ...Message) {
+	t.ToBusOnly(msg...)
+	t.ToSocketOnly(msg...)
+}
+
+func (t Transport) ToBusOnly(msg ...Message) {
+	if t.Bus == nil {
+		return
+	}
+	t.Bus.Send(msg...)
+}
+
+func (t Transport) ToSocketOnly(msg ...Message) {
+	if t.Socket == nil {
+		return
+	}
+	t.Socket.Send(msg...)
+}
+
 type TransportResponse interface {
 	Handle(context.Context, Message, Transport) MessageErr
 }
