@@ -248,19 +248,24 @@ func SubscribeMessage(topic string, grp string, fromAddr string) Message {
 	}
 }
 
-func (m *Message) WithPayload(lp []byte) *Message {
+func (m *Message) WithId(t nxid.ID) {
+	m.Id = t
+}
+
+func (m *Message) WithTopic(t string) {
+	m.Topic = t
+}
+
+func (m *Message) WithPayload(lp []byte) {
 	m.Bytes = lp
-	return m
 }
 
-func (m *Message) WithMetadata(meta map[string]string) *Message {
+func (m *Message) WithMetadata(meta map[string]string) {
 	m.Metadata = meta
-	return m
 }
 
-func (m *Message) WithParams(params map[string]string) *Message {
+func (m *Message) WithParams(params map[string]string) {
 	m.Params = params
-	return m
 }
 
 func (m Message) EncodeObject(encoder npkg.ObjectEncoder) {
