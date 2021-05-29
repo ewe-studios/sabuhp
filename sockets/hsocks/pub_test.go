@@ -55,7 +55,7 @@ func TestNewHub(t *testing.T) {
 		return nil
 	}
 
-	var codec = &codecs.JsonCodec{}
+	var codec = &codecs.MessageJsonCodec{}
 	var servletServer = ManagedHttpServlet(
 		controlCtx,
 		logger,

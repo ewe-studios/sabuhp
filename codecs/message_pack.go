@@ -9,11 +9,11 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-var _ sabuhp.Codec = (*MessagePackCodec)(nil)
+var _ sabuhp.Codec = (*MessageMsgPackCodec)(nil)
 
-type MessagePackCodec struct{}
+type MessageMsgPackCodec struct{}
 
-func (j *MessagePackCodec) Encode(message sabuhp.Message) ([]byte, error) {
+func (j *MessageMsgPackCodec) Encode(message sabuhp.Message) ([]byte, error) {
 	message.Parts = nil
 	var buf bytes.Buffer
 	if encodedErr := msgpack.NewEncoder(&buf).Encode(message); encodedErr != nil {
@@ -22,7 +22,7 @@ func (j *MessagePackCodec) Encode(message sabuhp.Message) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (j *MessagePackCodec) Decode(b []byte) (sabuhp.Message, error) {
+func (j *MessageMsgPackCodec) Decode(b []byte) (sabuhp.Message, error) {
 	var message sabuhp.Message
 	if jsonErr := msgpack.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
 		return message, nerror.WrapOnly(jsonErr)

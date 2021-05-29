@@ -20,7 +20,7 @@ func TestNewSSEHub(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
 	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
 
-	var codec = &codecs.JsonCodec{}
+	var codec = &codecs.MessageJsonCodec{}
 	var sseServer = ManagedSSEServer(controlCtx, logger, nil, codec)
 	require.NotNil(t, sseServer)
 

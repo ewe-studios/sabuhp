@@ -34,7 +34,7 @@ const (
 )
 
 var (
-	DefaultCodec = &codecs.MessagePackCodec{}
+	DefaultCodec = &codecs.MessageMsgPackCodec{}
 	upgrader     = &websocket.Upgrader{
 		HandshakeTimeout:  time.Second * 5,
 		ReadBufferSize:    gorillapub.DefaultMaxMessageSize,

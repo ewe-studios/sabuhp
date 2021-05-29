@@ -37,7 +37,7 @@ func NewPbRelay(ctx context.Context, logger Logger) *PbRelay {
 	return tm
 }
 
-func (tm *PbRelay) Handle(message Message, transport Transport) MessageErr {
+func (tm *PbRelay) Handle(ctx context.Context, message Message, transport Transport) MessageErr {
 	var logStack = njson.Log(tm.logger)
 
 	logStack.New().LInfo().
@@ -63,7 +63,7 @@ func (tm *PbRelay) Handle(message Message, transport Transport) MessageErr {
 			continue
 		}
 
-		if err := channel.Notify(message, transport); err != nil {
+		if err := channel.Notify(ctx, message, transport); err != nil {
 			logStack.New().LInfo().Message("channel failed to handle message").
 				Error("error", err).
 				String("topic", message.Topic)
@@ -399,7 +399,7 @@ func (sc *PbGroup) remove(info subInfo) {
 // an error then the publisher will be notified as if all handlers failed to handle the
 // message. If you dont want that, then dont return an error from any of your registered
 // handlers and handle the error appropriately.
-func (sc *PbGroup) Notify(msg Message, transport Transport) MessageErr {
+func (sc *PbGroup) Notify(ctx context.Context, msg Message, transport Transport) MessageErr {
 	var logStack = njson.Log(sc.logger)
 
 	logStack.New().LInfo().
@@ -434,7 +434,7 @@ func (sc *PbGroup) Notify(msg Message, transport Transport) MessageErr {
 					String("topic", sc.topic).
 					End()
 
-				if handleErr := subscriber.Handle(m, transport); handleErr != nil {
+				if handleErr := subscriber.Handle(ctx, m, transport); handleErr != nil {
 					logStack.New().Message("error occurred handled message").
 						Object("message", m).
 						String("topic", sc.topic).
@@ -524,8 +524,8 @@ func NewBusRelay(ctx context.Context, logger Logger, bus MessageBus) *BusRelay {
 	return &BusRelay{Bus: bus, Relay: NewPbRelay(ctx, logger)}
 }
 
-func (tm *BusRelay) Handle(message Message, transport Transport) MessageErr {
-	return tm.Relay.Handle(message, transport)
+func (tm *BusRelay) Handle(ctx context.Context, message Message, transport Transport) MessageErr {
+	return tm.Relay.Handle(ctx, message, transport)
 }
 
 func (br *BusRelay) Group(topic string, grp string) *PbGroup {
@@ -539,8 +539,8 @@ func (br *BusRelay) Group(topic string, grp string) *PbGroup {
 		return br.Relay.Group(topic, grp)
 	}
 
-	var busChannel = br.Bus.Listen(topic, grp, TransportResponseFunc(func(message Message, transport Transport) MessageErr {
-		return br.Relay.Handle(message, transport)
+	var busChannel = br.Bus.Listen(topic, grp, TransportResponseFunc(func(ctx context.Context, message Message, transport Transport) MessageErr {
+		return br.Relay.Handle(ctx, message, transport)
 	}))
 
 	br.bl.Lock()

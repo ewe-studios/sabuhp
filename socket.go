@@ -1,6 +1,7 @@
 package sabuhp
 
 import (
+	"context"
 	"net"
 	"sync"
 
@@ -182,7 +183,7 @@ func (st *StreamBus) SocketOpened(socket Socket) {
 }
 
 func (st *StreamBus) SocketSubscribe(b Message, socket Socket) MessageErr {
-	var channel = st.Bus.Listen(b.SubscribeTo, b.SubscribeGroup, TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+	var channel = st.Bus.Listen(b.SubscribeTo, b.SubscribeGroup, TransportResponseFunc(func(ctx context.Context, message Message, transport Transport) MessageErr {
 		var ft = message.Future
 		if message.Future == nil {
 			ft = nthen.NewFuture()
@@ -307,7 +308,7 @@ func (st *StreamBusRelay) SocketOpened(socket Socket) {
 
 func (st *StreamBusRelay) SocketSubscribe(b Message, socket Socket) MessageErr {
 	var group = st.BusRelay.Group(b.SubscribeTo, b.SubscribeGroup)
-	var channel = group.Listen(TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+	var channel = group.Listen(TransportResponseFunc(func(ctx context.Context, message Message, transport Transport) MessageErr {
 		var ft = message.Future
 		if message.Future == nil {
 			ft = nthen.NewFuture()
@@ -426,7 +427,7 @@ func (st *StreamRelay) SocketOpened(socket Socket) {
 
 func (st *StreamRelay) SocketSubscribe(b Message, socket Socket) MessageErr {
 	var group = st.Relay.Group(b.SubscribeTo, b.SubscribeGroup)
-	var channel = group.Listen(TransportResponseFunc(func(message Message, transport Transport) MessageErr {
+	var channel = group.Listen(TransportResponseFunc(func(ctx context.Context, message Message, transport Transport) MessageErr {
 		var ft = message.Future
 		if message.Future == nil {
 			ft = nthen.NewFuture()

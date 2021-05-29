@@ -111,7 +111,7 @@ func (b *Config) ensure() {
 		panic("Config.ctx is required")
 	}
 	if b.Codec == nil {
-		b.Codec = &codecs.MessagePackCodec{}
+		b.Codec = &codecs.MessageMsgPackCodec{}
 	}
 	if b.StreamMessageInterval <= 0 {
 		b.StreamMessageInterval = time.Second * 1
@@ -535,7 +535,7 @@ func (r *RedisMessageBus) handleXMessage(topicName string, handler sabuhp.Transp
 		}))
 	}
 
-	if handleErr := handler.Handle(decodedMessage, sabuhp.Transport{Bus: r}); handleErr != nil {
+	if handleErr := handler.Handle(r.ctx, decodedMessage, sabuhp.Transport{Bus: r}); handleErr != nil {
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", topicName)
 			event.String("message_id", message.ID)
@@ -635,7 +635,7 @@ func (r *RedisMessageBus) handleMessage(handler sabuhp.TransportResponse, messag
 		}))
 	}
 
-	if handleErr := handler.Handle(decodedMessage, sabuhp.Transport{Bus: r}); handleErr != nil {
+	if handleErr := handler.Handle(r.ctx, decodedMessage, sabuhp.Transport{Bus: r}); handleErr != nil {
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", message.Channel)
 			event.String("pattern", message.Pattern)

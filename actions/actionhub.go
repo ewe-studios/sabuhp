@@ -400,7 +400,7 @@ func (ah *ActionHub) createAutoActionWorkers() {
 func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 	var logger = ah.Logger
 	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(
-		func(data sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+		func(ctx context.Context, data sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 
 			// get or create worker group for request topic
 			var workerGroup *MasterWorkerGroup
@@ -416,7 +416,7 @@ func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 				return sabuhp.WrapErr(nerror.New("worker group not found"), false)
 			}
 
-			if err := workerGroup.Master.HandleMessage(data, tr); err != nil {
+			if err := workerGroup.Master.HandleMessage(ctx, data, tr); err != nil {
 				logger.Log(njson.JSONB(func(event npkg.Encoder) {
 					event.String("error", err.Error())
 					event.Int("_level", int(npkg.ERROR))
@@ -443,8 +443,8 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 
 	var logger = ah.Logger
 	var workerGroup = ah.createMasterGroup(req)
-	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(func(data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
-		if err := workerGroup.Master.HandleMessage(data, sub); err != nil {
+	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(func(ctx context.Context, data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
+		if err := workerGroup.Master.HandleMessage(ctx, data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
 				event.Int("_level", int(npkg.ERROR))
@@ -484,8 +484,8 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	var slaveWorkerGroup = NewWorkGroup(workerConfig)
 	masterGroup.Slaves[slaveName] = slaveWorkerGroup
 
-	var workerChannel = ah.Pubsub.Listen(slaveName, req.GroupName, sabuhp.TransportResponseFunc(func(data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
-		if err := slaveWorkerGroup.HandleMessage(data, sub); err != nil {
+	var workerChannel = ah.Pubsub.Listen(slaveName, req.GroupName, sabuhp.TransportResponseFunc(func(ctx context.Context, data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
+		if err := slaveWorkerGroup.HandleMessage(ctx, data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.Int("_level", int(npkg.ERROR))
 				event.String("error", err.Error())

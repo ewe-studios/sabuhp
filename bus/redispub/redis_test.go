@@ -15,7 +15,7 @@ import (
 	"github.com/ewe-studios/sabuhp/testingutils"
 )
 
-var codec = &codecs.JsonCodec{}
+var codec = &codecs.MessageJsonCodec{}
 
 func TestRedis__Start_Stop_WithCancel(t *testing.T) {
 	var ctx, canceler = context.WithCancel(context.Background())
@@ -100,7 +100,7 @@ func TestRedis_Stream(t *testing.T) {
 		"what",
 		"*",
 		sabuhp.TransportResponseFunc(
-			func(message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 				delivered.Done()
 				transport.Bus.Send(whyMessage)
 				return nil
@@ -111,7 +111,7 @@ func TestRedis_Stream(t *testing.T) {
 	defer channel.Close()
 
 	var channel2 = pb.Listen("why", "*", sabuhp.TransportResponseFunc(
-		func(message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+		func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 			delivered.Done()
 			return nil
 		}))
@@ -158,7 +158,7 @@ func TestRedis_PubSub(t *testing.T) {
 		"what",
 		"*",
 		sabuhp.TransportResponseFunc(
-			func(message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 				delivered.Done()
 				transport.Bus.Send(whyMessage)
 				return nil
@@ -169,7 +169,7 @@ func TestRedis_PubSub(t *testing.T) {
 	defer channel.Close()
 
 	var channel2 = pb.Listen("why", "*", sabuhp.TransportResponseFunc(
-		func(message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+		func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
 			delivered.Done()
 			return nil
 		}))

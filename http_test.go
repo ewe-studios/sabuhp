@@ -48,12 +48,9 @@ func TestHttpCodec(t *testing.T) {
 
 	salesRequest.Header.Set("Content-Type", "plain/html")
 
-	var salesRequestMessages, salesRequestMessageErr = decoder.Decode(salesRequest, Params{})
+	var salesRequestMessage, salesRequestMessageErr = decoder.Decode(salesRequest, Params{})
 	require.NoError(t, salesRequestMessageErr)
-	require.NotNil(t, salesRequestMessages)
-
-	var salesRequestMessage = salesRequestMessages[0]
-	require.Len(t, salesRequest, 1)
+	require.NotNil(t, salesRequestMessage)
 
 	require.Equal(t, "/sales", salesRequestMessage.Topic)
 	require.Equal(t, "/sales", salesRequestMessage.Path)

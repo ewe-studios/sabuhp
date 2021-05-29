@@ -150,6 +150,7 @@ func (wc *WorkerConfig) ensure() {
 }
 
 type WorkRequest struct {
+	Ctx       context.Context
 	Message   *sabuhp.Message
 	Transport sabuhp.Transport
 }
@@ -313,7 +314,7 @@ func (w *WorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *WorkerGroup) HandleMessage(message sabuhp.Message, t sabuhp.Transport) error {
+func (w *WorkerGroup) HandleMessage(ctx context.Context, message sabuhp.Message, t sabuhp.Transport) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -321,6 +322,7 @@ func (w *WorkerGroup) HandleMessage(message sabuhp.Message, t sabuhp.Transport) 
 	select {
 	case <-w.context.Done():
 	case w.jobs <- WorkRequest{
+		Ctx:       ctx,
 		Message:   &message,
 		Transport: t,
 	}:
@@ -341,6 +343,7 @@ func (w *WorkerGroup) HandleMessage(message sabuhp.Message, t sabuhp.Transport) 
 		return nerror.New("failed to handle message from %q", w.config.ActionName)
 	case w.jobs <- WorkRequest{
 		Message:   &message,
+		Ctx:       ctx,
 		Transport: t,
 	}:
 		return nil
@@ -350,6 +353,25 @@ func (w *WorkerGroup) HandleMessage(message sabuhp.Message, t sabuhp.Transport) 
 func (w *WorkerGroup) beginWork() {
 	w.workers.Add(1)
 	go w.doWork()
+}
+
+func muxContext(ctx1 context.Context, ctx2 context.Context) (context.Context, context.CancelFunc) {
+	var newCtx, newCanceler = context.WithCancel(context.Background())
+	go func() {
+		for {
+			select {
+			case <-newCtx.Done():
+				return
+			case <-ctx2.Done():
+				newCanceler()
+				return
+			case <-ctx1.Done():
+				newCanceler()
+				return
+			}
+		}
+	}()
+	return newCtx, newCanceler
 }
 
 func (w *WorkerGroup) doWork() {
@@ -425,7 +447,8 @@ func (w *WorkerGroup) doWork() {
 			return
 		case currentMessage = <-w.jobs:
 			atomic.AddInt64(&w.totalMessages, 1)
-			action.Do(w.context, Job{
+			var newCtx, newCanceler = muxContext(w.context, currentMessage.Ctx)
+			action.Do(newCtx, Job{
 				To:        w.config.Addr,
 				DI:        w.config.Injector,
 				Msg:       currentMessage.Message,
@@ -434,8 +457,10 @@ func (w *WorkerGroup) doWork() {
 			atomic.AddInt64(&w.totalProcessed, 1)
 
 			if w.config.Instance == OneTimeInstance {
+				newCanceler()
 				return
 			}
+			newCanceler()
 		case <-w.endWorker:
 			return
 		}

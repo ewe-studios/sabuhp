@@ -3,9 +3,10 @@ package sabuhp
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPbRelay(t *testing.T) {
@@ -15,12 +16,12 @@ func TestPbRelay(t *testing.T) {
 	var mb BusBuilder
 
 	var reply = BasicMsg("hello", "hello ", "you")
-	var manager = NewPbRelay(controlCtx,  logger)
+	var manager = NewPbRelay(controlCtx, logger)
 
 	var w sync.WaitGroup
 	w.Add(2)
 
-	var doAction = func(message Message, tr Transport) MessageErr {
+	var doAction = func(_ context.Context, message Message, tr Transport) MessageErr {
 		fmt.Println("Received message")
 		w.Done()
 		return nil
@@ -34,7 +35,7 @@ func TestPbRelay(t *testing.T) {
 	var topicChannel = group1.Listen(TransportResponseFunc(doAction))
 	var topicChannel2 = group2.Listen(TransportResponseFunc(doAction))
 
-	require.NoError(t, manager.Handle(reply, Transport{Bus: &mb}))
+	require.NoError(t, manager.Handle(controlCtx, reply, Transport{Bus: &mb}))
 
 	topicChannel2.Close()
 	topicChannel.Close()

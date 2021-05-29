@@ -9,11 +9,11 @@ import (
 	"github.com/influx6/npkg/nerror"
 )
 
-var _ sabuhp.Codec = (*GobCodec)(nil)
+var _ sabuhp.Codec = (*MessageGobCodec)(nil)
 
-type GobCodec struct{}
+type MessageGobCodec struct{}
 
-func (j *GobCodec) Encode(message sabuhp.Message) ([]byte, error) {
+func (j *MessageGobCodec) Encode(message sabuhp.Message) ([]byte, error) {
 	message.Parts = nil
 	var buf bytes.Buffer
 	if encodedErr := gob.NewEncoder(&buf).Encode(message); encodedErr != nil {
@@ -22,7 +22,7 @@ func (j *GobCodec) Encode(message sabuhp.Message) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (j *GobCodec) Decode(b []byte) (sabuhp.Message, error) {
+func (j *MessageGobCodec) Decode(b []byte) (sabuhp.Message, error) {
 	var message sabuhp.Message
 	if jsonErr := gob.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
 		return message, nerror.WrapOnly(jsonErr)

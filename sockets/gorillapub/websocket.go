@@ -24,13 +24,13 @@ import (
 )
 
 const (
-	// default buffer size for socket message channel.
+	// DefaultBufferForMessages default buffer size for socket message channel.
 	DefaultBufferForMessages = 100
 
 	// DefaultReconnectionWaitCheck defines the default Wait time for checking reconnection.
 	DefaultReconnectionWaitCheck = time.Millisecond * 200
 
-	// DefaultReadWait defines the default Wait time for writing.
+	// DefaultWriteWait defines the default Wait time for writing.
 	DefaultWriteWait = time.Second * 60
 
 	// DefaultReadWait defines the default Wait time for reading.
@@ -43,15 +43,14 @@ const (
 	// DefaultMessageType defines the default message type expected.
 	DefaultMessageType = websocket.BinaryMessage
 
-	// Default maximum message size allowed if user does not set value
+	// DefaultMaxMessageSize Default maximum message size allowed if user does not set value
 	// in SocketConfig.
 	DefaultMaxMessageSize = 4096
 )
 
 var (
-	sabuMessageWSHeader  = []byte("0|")
-	anyMessageWSHeader   = []byte("1|")
-	websocketHeadMessage = []byte("Websocket Endpoint!\n")
+	sabuMessageWSHeader = []byte("0|")
+	anyMessageWSHeader  = []byte("1|")
 )
 
 type ResponseHeadersFromRequest func(r *http.Request) http.Header

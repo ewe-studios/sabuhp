@@ -132,7 +132,7 @@ func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp
 				}
 
 				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
-					return muxHandler.Handle(b, sabuhp.Transport{
+					return muxHandler.Handle(request.Context(), b, sabuhp.Transport{
 						Bus:    m.config.Bus,
 						Socket: from,
 					})
@@ -163,7 +163,7 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 				}
 
 				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabuhp.Message, from sabuhp.Socket) error {
-					return muxHandler.Handle(b, sabuhp.Transport{
+					return muxHandler.Handle(request.Context(), b, sabuhp.Transport{
 						Bus:    m.config.Bus,
 						Socket: from,
 					})
@@ -200,7 +200,7 @@ func (m *Mux) Service(eventName string, grp string, route string, handler sabuhp
 				}
 
 				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
-					return muxHandler.Handle(b, sabuhp.Transport{
+					return muxHandler.Handle(request.Context(), b, sabuhp.Transport{
 						Bus:    m.config.Bus,
 						Socket: from,
 					})
@@ -271,10 +271,10 @@ func (m *Mux) Match(msg *sabuhp.Message) bool {
 	return handler != nil
 }
 
-func (m *Mux) ServeWithMatchers(msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+func (m *Mux) ServeWithMatchers(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	for _, h := range m.subRoutes {
 		if h.Match(&msg) {
-			return h.Handle(msg, tr)
+			return h.Handle(ctx, msg, tr)
 		}
 	}
 

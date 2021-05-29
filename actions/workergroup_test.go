@@ -55,7 +55,7 @@ func TestNewWorkGroup(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(sabuhp.Message{
+		require.NoError(t, group.HandleMessage(context.Background(), sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Bytes:    textPayload,
@@ -104,7 +104,7 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(sabuhp.Message{
+		require.NoError(t, group.HandleMessage(context.Background(), sabuhp.Message{
 			Topic:    "find_user",
 			FromAddr: "component_1",
 			Bytes:    textPayload,
@@ -161,7 +161,7 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 		Bytes:    textPayload,
 		Metadata: nil,
 	}
-	require.NoError(t, group.HandleMessage(msg, transport))
+	require.NoError(t, group.HandleMessage(context.Background(), msg, transport))
 
 	<-notify
 
@@ -205,7 +205,7 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 
 	<-time.After(time.Second / 2)
 	var textPayload = []byte("Welcome to life")
-	require.NoError(t, group.HandleMessage(sabuhp.Message{
+	require.NoError(t, group.HandleMessage(context.Background(), sabuhp.Message{
 		Topic:    "find_user",
 		FromAddr: "component_1",
 		Bytes:    textPayload,

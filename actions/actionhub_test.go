@@ -66,7 +66,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		for _, channel := range channels {
 			for _, message := range msgs {
 				if channel.T == message.Topic {
-					_ = channel.Handler.Handle(message, sabuhp.Transport{Bus: &mb})
+					_ = channel.Handler.Handle(context.Background(), message, sabuhp.Transport{Bus: &mb})
 				}
 			}
 		}

@@ -18,7 +18,7 @@ import (
 	"github.com/ewe-studios/websocket"
 )
 
-var codec = &codecs.JsonCodec{}
+var codec = &codecs.MessageJsonCodec{}
 var upgrader = &websocket.Upgrader{
 	HandshakeTimeout:  time.Second * 5,
 	ReadBufferSize:    DefaultMaxMessageSize,

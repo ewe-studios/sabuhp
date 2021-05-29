@@ -1,6 +1,7 @@
 package sabuhp
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -147,18 +148,18 @@ type HttpMatcher interface {
 }
 
 type Transport struct {
-	Bus MessageBus
+	Bus    MessageBus
 	Socket Socket
 }
 
 type TransportResponse interface {
-	Handle(Message, Transport) MessageErr
+	Handle(context.Context, Message, Transport) MessageErr
 }
 
-type TransportResponseFunc func(Message, Transport) MessageErr
+type TransportResponseFunc func(context.Context, Message, Transport) MessageErr
 
-func (t TransportResponseFunc) Handle(message Message, tr Transport) MessageErr {
-	return t(message, tr)
+func (t TransportResponseFunc) Handle(ctx context.Context, message Message, tr Transport) MessageErr {
+	return t(ctx, message, tr)
 }
 
 // MessageBus defines what an underline message transport implementation
@@ -240,5 +241,3 @@ type MessageRouter interface {
 	TransportResponse
 	Matcher
 }
-
-
