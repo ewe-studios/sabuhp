@@ -19,7 +19,8 @@ import (
 )
 
 func main() {
-	var ctx, waiter = ndaemon.CtxAndWaiterFor(context.Background())
+	var ctx, canceler = context.WithCancel(context.Background())
+	ndaemon.WaiterForKillWithSignal(ndaemon.WaitForKillChan(), canceler)
 
 	var logger sabuhp.GoLogImpl
 
@@ -46,8 +47,6 @@ func main() {
 	cs.Start()
 
 	fmt.Println("Started worker service")
-	waiter.Wait()
-
 	if err := cs.ErrGroup.Wait(); err != nil {
 		log.Fatalf("service group finished with error: %+s", err.Error())
 	}
