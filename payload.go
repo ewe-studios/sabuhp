@@ -142,6 +142,17 @@ type Message struct {
 	Parts []Message
 }
 
+// ReplyWithTopic returns a new message with provided topic.
+func (m Message) ReplyWithTopic(t string) Message {
+	return Message{
+		Topic:       t,
+		ContentType: MessageContentType,
+		Id:          nxid.New(),
+		Params:      Params{},
+		Metadata:    Params{},
+	}
+}
+
 // ReplyTo returns a new instance of a Message using the FromAddr as the
 // topic.
 func (m Message) ReplyTo() Message {
