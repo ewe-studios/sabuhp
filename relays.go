@@ -517,11 +517,11 @@ type BusRelay struct {
 }
 
 func BusWithRelay(relay *PbRelay, bus MessageBus) *BusRelay {
-	return &BusRelay{Bus: bus, Relay: relay}
+	return &BusRelay{Bus: bus, Relay: relay, busChannels: map[string]Channel{}}
 }
 
 func NewBusRelay(ctx context.Context, logger Logger, bus MessageBus) *BusRelay {
-	return &BusRelay{Bus: bus, Relay: NewPbRelay(ctx, logger)}
+	return &BusRelay{Bus: bus, Relay: NewPbRelay(ctx, logger), busChannels: map[string]Channel{}}
 }
 
 func (tm *BusRelay) Handle(ctx context.Context, message Message, transport Transport) MessageErr {
