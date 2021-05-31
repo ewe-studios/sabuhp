@@ -402,6 +402,11 @@ func (se *ServletSocket) Start() error {
 			Message("failed handle socket message").
 			String("error", nerror.WrapOnly(handleErr).Error()).
 			End()
+
+		if mh, ok := handleErr.(sabuhp.MessageErr); ok {
+			se.res.WriteHeader(mh.StatusCode())
+		}
+
 		return handleErr
 	}
 

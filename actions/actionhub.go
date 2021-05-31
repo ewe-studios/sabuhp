@@ -123,6 +123,20 @@ type WorkerRequest struct {
 	Slaves []SlaveWorkerRequest
 }
 
+func NewWorker(name string, topic string, grp string, action Action) WorkerRequest {
+	return WorkerRequest{
+		Err:         nil,
+		Slaves:      nil,
+		ActionName:  name,
+		PubSubTopic: topic,
+		PubSubGroup: grp,
+		WorkerCreator: func(config WorkerConfig) *WorkerGroup {
+			config.Action = action
+			return NewWorkGroup(config)
+		},
+	}
+}
+
 func (wc *WorkerRequest) ensure() {
 	if wc.ActionName == "" {
 		panic("WorkerConfig.ActionName must be provided")
@@ -451,7 +465,14 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 				event.String("channel_topic", req.PubSubTopic)
 				event.String("channel_action", req.ActionName)
 			}))
+			if data.Future != nil {
+				data.Future.WithError(err)
+			}
 			return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+		}
+
+		if data.Future != nil {
+			data.Future.WithValue(nil)
 		}
 		return nil
 	}))

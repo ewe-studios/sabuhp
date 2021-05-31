@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/influx6/npkg/nthen"
+
 	"github.com/ewe-studios/sabuhp/codecs"
 
 	"github.com/influx6/npkg/nunsafe"
@@ -635,7 +637,10 @@ func (r *RedisMessageBus) handleMessage(handler sabuhp.TransportResponse, messag
 		}))
 	}
 
+	decodedMessage.Future = nthen.NewFuture()
+
 	if handleErr := handler.Handle(r.ctx, decodedMessage, sabuhp.Transport{Bus: r}); handleErr != nil {
+		decodedMessage.Future.WithError(handleErr)
 		r.logger.Log(njson.MJSON("failed to handle message", func(event npkg.Encoder) {
 			event.String("topic", message.Channel)
 			event.String("pattern", message.Pattern)
@@ -643,7 +648,10 @@ func (r *RedisMessageBus) handleMessage(handler sabuhp.TransportResponse, messag
 			event.String("payload", message.Payload)
 			event.String("error", handleErr.Error())
 		}))
+		return
 	}
+
+	decodedMessage.Future.WithValue(nil)
 }
 
 func (r *RedisMessageBus) Send(data ...sabuhp.Message) {

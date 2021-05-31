@@ -44,11 +44,21 @@ func (n NoopChannel) Err() error { return nil }
 
 type MessageErr interface {
 	error
+	StatusCode() int
 	ShouldAck() bool
 }
 
 func WrapErr(err error, shouldAck bool) MessageErr {
 	return messageErr{
+		code:      500,
+		error:     err,
+		shouldAck: shouldAck,
+	}
+}
+
+func WrapErrWithStatusCode(err error, code int, shouldAck bool) MessageErr {
+	return messageErr{
+		code:      code,
 		error:     err,
 		shouldAck: shouldAck,
 	}
@@ -56,7 +66,12 @@ func WrapErr(err error, shouldAck bool) MessageErr {
 
 type messageErr struct {
 	error
+	code      int
 	shouldAck bool
+}
+
+func (m messageErr) StatusCode() int {
+	return m.code
 }
 
 func (m messageErr) ShouldAck() bool {

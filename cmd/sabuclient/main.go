@@ -30,6 +30,8 @@ func main() {
 		log.Fatalf("Failed to create bus connection: %q\n", busErr.Error())
 	}
 
+	redisBus.Start()
+
 	var cs = clientServer.New(
 		ctx,
 		logger,
