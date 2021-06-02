@@ -47,6 +47,11 @@ func TR(env string, t string) Topic {
 	return NewTopic(fmt.Sprintf("%s.%s", env, t), nstr.RandomAlphabets(20))
 }
 
+// TRS allows creating a topic with a environment and service prefix and a 20 length random string suffix.
+func TRS(env string, service string, t string) Topic {
+	return NewTopic(fmt.Sprintf("%s.%s.%s", env, service, t), nstr.RandomAlphabets(20))
+}
+
 func NewTopic(t string, r string) Topic {
 	return Topic{
 		T: t,
