@@ -52,7 +52,7 @@ func TestHttpCodec(t *testing.T) {
 	require.NoError(t, salesRequestMessageErr)
 	require.NotNil(t, salesRequestMessage)
 
-	require.Equal(t, "/sales", salesRequestMessage.Topic)
+	require.Equal(t, "/sales", salesRequestMessage.Topic.String())
 	require.Equal(t, "/sales", salesRequestMessage.Path)
 	require.Equal(t, "plain/html", salesRequestMessage.ContentType)
 	require.Equal(t, "alex", string(salesRequestMessage.Bytes))

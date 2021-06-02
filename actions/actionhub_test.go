@@ -121,8 +121,8 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	<-ack
 
 	require.Len(t, sendList, 2)
-	require.Equal(t, "say_hello", sendList[0].Topic)
-	require.Equal(t, "yay", sendList[1].Topic)
+	require.Equal(t, "say_hello", sendList[0].Topic.String())
+	require.Equal(t, "yay", sendList[1].Topic.String())
 
 	canceler()
 	hub.Wait()
