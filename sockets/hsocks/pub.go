@@ -391,7 +391,7 @@ func (se *ServletSocket) Start() error {
 
 	// if we have being scoped to specific event name, use that.
 	if se.asEvent != "" {
-		decodedMessage.Topic = se.asEvent
+		decodedMessage.Topic = sabuhp.T(se.asEvent)
 	}
 
 	// overridingHandler overrides sending message to the manager

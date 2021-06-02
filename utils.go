@@ -1,8 +1,12 @@
 package sabuhp
 
 import (
-	"github.com/influx6/npkg/njson"
 	"log"
+	"time"
+
+	"github.com/influx6/npkg/nthen"
+
+	"github.com/influx6/npkg/njson"
 )
 
 // SplitMessagesToGroups will split messages into subscription, unsubscription and
@@ -42,16 +46,19 @@ func (l GoLogImpl) Log(cb *njson.JSON) {
 var _ MessageBus = (*BusBuilder)(nil)
 
 type BusBuilder struct {
-	SendFunc func(data ...Message)
-	ListenFunc    func(topic string, grp string, handler TransportResponse) Channel
+	SendFunc         func(data ...Message)
+	SendForReplyFunc func(tm time.Duration, from Topic, replyGroup string, data ...Message) *nthen.Future
+	ListenFunc       func(topic string, grp string, handler TransportResponse) Channel
 }
-
 
 func (t BusBuilder) Listen(topic string, grp string, handler TransportResponse) Channel {
 	return t.ListenFunc(topic, grp, handler)
 }
 
+func (t BusBuilder) SendForReply(tm time.Duration, from Topic, replyGroup string, data ...Message) *nthen.Future {
+	return t.SendForReplyFunc(tm, from, replyGroup, data...)
+}
+
 func (t BusBuilder) Send(data ...Message) {
 	t.SendFunc(data...)
 }
-

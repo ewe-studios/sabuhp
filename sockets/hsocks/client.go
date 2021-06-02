@@ -176,7 +176,7 @@ func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
 	var contentTypeLower = strings.ToLower(contentType)
 	if !strings.Contains(contentTypeLower, sabuhp.MessageContentType) {
 		ft.WithValue(sabuhp.Message{
-			Topic:       req.URL.Path,
+			Topic:       sabuhp.T(req.URL.Path),
 			Id:          nxid.New(),
 			ContentType: contentType,
 			Path:        req.URL.Path,

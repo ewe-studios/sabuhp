@@ -232,14 +232,48 @@ func (st *StreamBus) SocketUnsubscribe(b Message, socket Socket) MessageErr {
 	return nil
 }
 
-func (st *StreamBus) SocketBusSend(b Message, _ Socket) MessageErr {
+func (st *StreamBus) SocketBusSend(b Message, sock Socket) MessageErr {
 	var mb = &b
 	if mb.Future == nil {
 		mb.Future = nthen.NewFuture()
 	}
 
-	st.Bus.Send(b)
-	return WrapErr(mb.Future.Err(), false)
+	if !b.ExpectReply {
+		st.Bus.Send(b)
+
+		var itemErr = mb.Future.Err()
+		if itemErr != nil {
+			var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+			replyMsg.ReplyErr = nerror.WrapOnly(itemErr)
+			sock.Send(replyMsg)
+
+			return WrapErr(mb.Future.Err(), false)
+		}
+
+		return nil
+	}
+
+	var ft = st.Bus.SendForReply(b.Within, b.Topic, b.ReplyGroup, b)
+
+	var result, sendErr = ft.Get()
+	if sendErr != nil {
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(sendErr)
+		sock.Send(replyMsg)
+		return WrapErr(sendErr, false)
+	}
+
+	var messageResult, ok = result.(Message)
+	if !ok {
+		var sendErr = nerror.New("reply is not a Message type")
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(sendErr)
+		sock.Send(replyMsg)
+		return WrapErr(sendErr, false)
+	}
+
+	sock.Send(messageResult)
+	return nil
 }
 
 type StreamBusRelay struct {
@@ -347,17 +381,50 @@ func (st *StreamBusRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr
 	return nil
 }
 
-func (st *StreamBusRelay) SocketBusSend(b Message, _ Socket) MessageErr {
+func (st *StreamBusRelay) SocketBusSend(b Message, sock Socket) MessageErr {
 	var mb = &b
 	if mb.Future == nil {
 		mb.Future = nthen.NewFuture()
 	}
 
-	st.Bus.Send(b)
+	if !b.ExpectReply {
+		st.Bus.Send(b)
+		var itemErr = mb.Future.Err()
+		if itemErr != nil {
+			return WrapErr(mb.Future.Err(), false)
+		}
+		return nil
+	}
+
 	var itemErr = mb.Future.Err()
 	if itemErr != nil {
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(itemErr)
+		sock.Send(replyMsg)
+
 		return WrapErr(mb.Future.Err(), false)
 	}
+
+	var ft = st.Bus.SendForReply(b.Within, b.Topic, b.ReplyGroup, b)
+
+	var result, sendErr = ft.Get()
+	if sendErr != nil {
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(sendErr)
+		sock.Send(replyMsg)
+		return WrapErr(sendErr, false)
+	}
+
+	var messageResult, ok = result.(Message)
+	if !ok {
+		var sendErr = nerror.New("reply is not a Message type")
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(sendErr)
+		sock.Send(replyMsg)
+		return WrapErr(sendErr, false)
+	}
+
+	sock.Send(messageResult)
 	return nil
 }
 
@@ -466,17 +533,50 @@ func (st *StreamRelay) SocketUnsubscribe(b Message, socket Socket) MessageErr {
 	return nil
 }
 
-func (st *StreamRelay) SocketBusSend(b Message, _ Socket) MessageErr {
+func (st *StreamRelay) SocketBusSend(b Message, sock Socket) MessageErr {
 	var mb = &b
 	if mb.Future == nil {
 		mb.Future = nthen.NewFuture()
 	}
 
-	st.Bus.Send(b)
+	if !b.ExpectReply {
+		st.Bus.Send(b)
+		var itemErr = mb.Future.Err()
+		if itemErr != nil {
+			return WrapErr(mb.Future.Err(), false)
+		}
+		return nil
+	}
+
 	var itemErr = mb.Future.Err()
 	if itemErr != nil {
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(itemErr)
+		sock.Send(replyMsg)
+
 		return WrapErr(mb.Future.Err(), false)
 	}
+
+	var ft = st.Bus.SendForReply(b.Within, b.Topic, b.ReplyGroup, b)
+
+	var result, sendErr = ft.Get()
+	if sendErr != nil {
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(sendErr)
+		sock.Send(replyMsg)
+		return WrapErr(sendErr, false)
+	}
+
+	var messageResult, ok = result.(Message)
+	if !ok {
+		var sendErr = nerror.New("reply is not a Message type")
+		var replyMsg = b.ReplyWithTopic(b.Topic.ReplyTopic())
+		replyMsg.ReplyErr = nerror.WrapOnly(sendErr)
+		sock.Send(replyMsg)
+		return WrapErr(sendErr, false)
+	}
+
+	sock.Send(messageResult)
 	return nil
 }
 

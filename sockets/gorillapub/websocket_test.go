@@ -86,7 +86,7 @@ func TestGorillaClient(t *testing.T) {
 
 	client.Start()
 
-	var subscribeMessage = testingutils.Msg("hello", "alex", "me")
+	var subscribeMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
 	subscribeMessage.Future = nthen.NewFuture()
 
 	client.Send(subscribeMessage)

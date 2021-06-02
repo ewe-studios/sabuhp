@@ -80,7 +80,7 @@ func TestNewHub(t *testing.T) {
 	require.NoError(t, socketErr)
 	require.NotNil(t, socket)
 
-	var topicMessage = testingutils.Msg("hello", "alex", "me")
+	var topicMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
 	topicMessage.Future = nthen.NewFuture()
 
 	var ft = socket.Send("POST", topicMessage)

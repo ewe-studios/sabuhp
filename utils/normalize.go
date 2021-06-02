@@ -2,7 +2,7 @@ package utils
 
 import "io"
 
-// A reader which normalises line endings
+// NormalisedReader reader which normalises line endings
 // "/r" and "/r/n" are converted to "/n"
 type NormalisedReader struct {
 	r        io.Reader

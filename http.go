@@ -121,7 +121,7 @@ func (r *HttpDecoderImpl) Decode(req *http.Request, params Params) (Message, err
 	}
 
 	var (
-		topic              = req.URL.Path
+		topic              = T(req.URL.Path)
 		fromAddr           = req.RemoteAddr
 		requestForm        = req.Form
 		requestContentType = contentType

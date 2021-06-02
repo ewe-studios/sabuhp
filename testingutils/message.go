@@ -8,7 +8,7 @@ import (
 	"github.com/ewe-studios/websocket"
 )
 
-func Msg(topic string, message string, fromAddr string) sabuhp.Message {
+func Msg(topic sabuhp.Topic, message string, fromAddr string) sabuhp.Message {
 	return sabuhp.Message{
 		Topic:       topic,
 		FromAddr:    fromAddr,
@@ -17,7 +17,7 @@ func Msg(topic string, message string, fromAddr string) sabuhp.Message {
 	}
 }
 
-func EncodedMsg(codec sabuhp.Codec, topic string, message string, fromAddr string) ([]byte, error) {
+func EncodedMsg(codec sabuhp.Codec, topic sabuhp.Topic, message string, fromAddr string) ([]byte, error) {
 	return codec.Encode(sabuhp.Message{
 		Topic:       topic,
 		FromAddr:    fromAddr,

@@ -29,7 +29,7 @@ import (
 
 const (
 	GroupExistErrorMsg        = "BUSYGROUP Consumer Group name already exists"
-	SubscriptionExistsAlready = "Topic is already subscribed to"
+	SubscriptionExistsAlready = "String is already subscribed to"
 )
 
 var (
@@ -658,6 +658,44 @@ func (r *RedisMessageBus) Send(data ...sabuhp.Message) {
 	r.sendChannelBatch(data, r.channel)
 }
 
+func (r *RedisMessageBus) SendForReply(tm time.Duration, fromTopic sabuhp.Topic, replyGroup string, data ...sabuhp.Message) *nthen.Future {
+	var ft = nthen.Fn(func(ft *nthen.Future) {
+		var replyChannel = r.Listen(fromTopic.ReplyTopic().String(), replyGroup, sabuhp.TransportResponseFunc(func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+			// delete reply stream
+			var intCmd = r.client.Del(ctx, fromTopic.ReplyTopic().String())
+			if intCmd.Err() != nil {
+				r.logger.Log(njson.MJSON("received message to decode", func(event npkg.Encoder) {
+					event.String("topic", message.Topic.String())
+					event.Int("_level", int(npkg.INFO))
+					event.Error("error", intCmd.Err())
+				}))
+			}
+
+			ft.WithValue(message)
+			return nil
+		}))
+
+		// send message after listening for reply
+		r.sendChannelBatch(data, r.channel)
+
+		<-time.After(tm)
+		replyChannel.Close()
+
+		// delete reply stream
+		var intCmd = r.client.Del(r.ctx, fromTopic.ReplyTopic().String())
+		if intCmd.Err() != nil {
+			r.logger.Log(njson.MJSON("received message to decode", func(event npkg.Encoder) {
+				event.String("topic", fromTopic.String())
+				event.Int("_level", int(npkg.INFO))
+				event.Error("error", intCmd.Err())
+			}))
+		}
+
+		ft.WithError(nerror.New("timed out waiting for reply"))
+	})
+	return ft
+}
+
 func (r *RedisMessageBus) sendChannelBatch(batch []sabuhp.Message, channel MessageChannel) {
 	var pipelining = r.client.Pipeline()
 
@@ -671,7 +709,7 @@ func (r *RedisMessageBus) sendChannelBatch(batch []sabuhp.Message, channel Messa
 			}
 
 			r.logger.Log(njson.MJSON("failed to encode message", func(event npkg.Encoder) {
-				event.String("topic", msg.Topic)
+				event.String("topic", msg.Topic.String())
 				event.Int("_level", int(npkg.ERROR))
 				event.String("from_addr", msg.FromAddr)
 				event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
@@ -682,13 +720,13 @@ func (r *RedisMessageBus) sendChannelBatch(batch []sabuhp.Message, channel Messa
 
 		// publish to streams
 		if channel == RedisStreams {
-			if addErr := r.sendStream(msg.Topic, encodedData, pipelining); addErr != nil {
+			if addErr := r.sendStream(msg.Topic.String(), encodedData, pipelining); addErr != nil {
 				if ft != nil {
 					ft.WithError(addErr)
 				}
 
 				r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
-					event.String("topic", msg.Topic)
+					event.String("topic", msg.Topic.String())
 					event.String("from_addr", msg.FromAddr)
 					event.Int("_level", int(npkg.ERROR))
 					event.String("payload", fmt.Sprintf("%#v", msg.Bytes))
@@ -699,13 +737,13 @@ func (r *RedisMessageBus) sendChannelBatch(batch []sabuhp.Message, channel Messa
 		}
 
 		// publish to pubsub
-		if addErr := r.sendPubSub(msg.Topic, encodedData, pipelining); addErr != nil {
+		if addErr := r.sendPubSub(msg.Topic.String(), encodedData, pipelining); addErr != nil {
 			if ft != nil {
 				ft.WithError(addErr)
 			}
 
 			r.logger.Log(njson.MJSON("failed to add to pipelined", func(event npkg.Encoder) {
-				event.String("topic", msg.Topic)
+				event.String("topic", msg.Topic.String())
 				event.String("from_addr", msg.FromAddr)
 				event.Int("_level", int(npkg.ERROR))
 				event.String("payload", fmt.Sprintf("%#v", msg.Bytes))

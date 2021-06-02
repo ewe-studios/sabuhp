@@ -2,6 +2,7 @@ package redispub
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -90,8 +91,8 @@ func TestRedis_Stream(t *testing.T) {
 	pb.Start()
 
 	var content = []byte("\"yes\"")
-	var whyMessage = sabuhp.NewMessage("why", "me", content)
-	var whatMessage = sabuhp.NewMessage("what", "me", content)
+	var whyMessage = sabuhp.NewMessage(sabuhp.T("why"), "me", content)
+	var whatMessage = sabuhp.NewMessage(sabuhp.T("what"), "me", content)
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
@@ -148,8 +149,8 @@ func TestRedis_PubSub(t *testing.T) {
 	pb.Start()
 
 	var content = []byte("\"yes\"")
-	var whyMessage = sabuhp.NewMessage("why", "me", content)
-	var whatMessage = sabuhp.NewMessage("what", "me", content)
+	var whyMessage = sabuhp.NewMessage(sabuhp.T("why"), "me", content)
+	var whatMessage = sabuhp.NewMessage(sabuhp.T("what"), "me", content)
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
@@ -179,6 +180,67 @@ func TestRedis_PubSub(t *testing.T) {
 	defer channel2.Close()
 
 	pb.Send(whatMessage)
+
+	delivered.Wait()
+
+	canceler()
+	pb.Wait()
+}
+
+func TestRedis_PubSub_WithReply(t *testing.T) {
+	var ctx, canceler = context.WithCancel(context.Background())
+	defer canceler()
+
+	var logger = &testingutils.LoggerPub{}
+	var config Config
+	config.Ctx = ctx
+	config.Codec = codec
+	config.Logger = logger
+	config.Redis = redis.Options{
+		Network: "tcp",
+	}
+
+	var pb, err = PubSub(config)
+	require.NoError(t, err)
+	require.NotNil(t, pb)
+
+	pb.Start()
+
+	var content = []byte("\"yes\"")
+
+	var whyMessage = sabuhp.NewMessage(sabuhp.T("why"), "me", content)
+	whyMessage.ReplyGroup = "*"
+
+	var whyReplyMessage = sabuhp.NewMessage(whyMessage.Topic.ReplyTopic(), "me", content)
+	whyReplyMessage.ReplyGroup = "*"
+	whyReplyMessage.Bytes = []byte("Yo!")
+
+	var delivered sync.WaitGroup
+	delivered.Add(1)
+
+	var channel = pb.Listen(
+		whyMessage.Topic.String(),
+		"*",
+		sabuhp.TransportResponseFunc(
+			func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+				fmt.Printf("Received message: %+s\n", message)
+				delivered.Done()
+				transport.Bus.Send(whyReplyMessage)
+				return nil
+			}))
+
+	require.NoError(t, channel.Err())
+
+	defer channel.Close()
+
+	var replyFT = pb.SendForReply(time.Minute, whyMessage.Topic, "*", whyMessage)
+	var replyMsg, replyErr = replyFT.Get()
+	require.NoError(t, replyErr)
+	require.NotNil(t, replyMsg)
+
+	var rm = replyMsg.(sabuhp.Message)
+
+	require.Equal(t, "Yo!", string(rm.Bytes))
 
 	delivered.Wait()
 

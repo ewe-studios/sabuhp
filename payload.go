@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/influx6/npkg/nstr"
+
 	"github.com/influx6/npkg/nthen"
 
 	"github.com/influx6/npkg/nunsafe"
@@ -30,6 +32,30 @@ type BytesSplitter interface {
 	SplitBytes(data []byte) (chan<- Message, error)
 }
 
+type Topic struct {
+	T string
+	R string
+}
+
+func T(t string) Topic {
+	return NewTopic(t, nstr.RandomAlphabets(10))
+}
+
+func NewTopic(t string, r string) Topic {
+	return Topic{
+		T: t,
+		R: r,
+	}
+}
+
+func (t Topic) String() string {
+	return t.T
+}
+
+func (t Topic) ReplyTopic() Topic {
+	return NewTopic(fmt.Sprintf("%s-reply-%s", t.T, t.R), "")
+}
+
 type Message struct {
 	// Optional future which will indicate if message delivery should
 	// notify attached future on result.
@@ -43,6 +69,14 @@ type Message struct {
 
 	// LocalIP of the request producing this if from http.
 	LocalIP string
+
+	// ExpectReply indicates if the receiver of said message should
+	// handle this as a SendReply operation.
+	ExpectReply bool
+
+	// Optional reply error send to indicate message is an error reply
+	// and the error that occurred.
+	ReplyErr error
 
 	// SuggestedStatusCode is an optional field settable by the
 	// creator to suggest possible status code of a message.
@@ -115,7 +149,10 @@ type Message struct {
 	SubscribeTo string
 
 	// Topic for giving message (serving as to address).
-	Topic string
+	Topic Topic
+
+	// ReplyGroup is the when provided the suggested topic to reply to by receiving party.
+	ReplyGroup string
 
 	// FromAddr is the logical address of the sender of message.
 	FromAddr string
@@ -136,14 +173,14 @@ type Message struct {
 	// of the PartId.
 	//
 	// We do this because we do not let handlers handle a list of messages but one
-	// and to accomodate large messages split in parts or messages which are logical
+	// and to accommodate large messages split in parts or messages which are logical
 	// parts of themselves, this field is an option, generally.
 	// Codecs should never read this
 	Parts []Message
 }
 
 // ReplyWithTopic returns a new message with provided topic.
-func (m Message) ReplyWithTopic(t string) Message {
+func (m Message) ReplyWithTopic(t Topic) Message {
 	return Message{
 		Topic:       t,
 		ContentType: MessageContentType,
@@ -159,7 +196,7 @@ func (m Message) ReplyTo() Message {
 	return Message{
 		ContentType: MessageContentType,
 		Id:          nxid.New(),
-		Topic:       m.FromAddr,
+		Topic:       T(m.FromAddr),
 		Params:      Params{},
 		Metadata:    Params{},
 	}
@@ -173,20 +210,20 @@ func (m Message) ReplyToWith(params Params, meta Params, payload []byte) Message
 		Params:      params,
 		Metadata:    meta,
 		Id:          nxid.New(),
-		Topic:       m.FromAddr,
+		Topic:       T(m.FromAddr),
 	}
 }
 
-const (
-	SUBSCRIBE   = "+SUB"
-	UNSUBSCRIBE = "-USUB"
-	DONE        = "+OK"
-	NOTDONE     = "-NOK"
+var (
+	SUBSCRIBE   = T("+SUB")
+	UNSUBSCRIBE = T("-USUB")
+	DONE        = T("+OK")
+	NOTDONE     = T("-NOK")
 )
 
 const MessageContentType = "application/x-event-message"
 
-func NewMessage(topic string, fromAddr string, payload []byte) Message {
+func NewMessage(topic Topic, fromAddr string, payload []byte) Message {
 	return Message{
 		Id:          nxid.New(),
 		Topic:       topic,
@@ -206,7 +243,7 @@ func NOTOK(message string, fromAddr string) Message {
 	}
 }
 
-func BasicMsg(topic string, message string, fromAddr string) Message {
+func BasicMsg(topic Topic, message string, fromAddr string) Message {
 	return Message{
 		Id:          nxid.New(),
 		Topic:       topic,
@@ -252,7 +289,7 @@ func (m *Message) WithId(t nxid.ID) {
 	m.Id = t
 }
 
-func (m *Message) WithTopic(t string) {
+func (m *Message) WithTopic(t Topic) {
 	m.Topic = t
 }
 
@@ -269,7 +306,7 @@ func (m *Message) WithParams(params map[string]string) {
 }
 
 func (m Message) EncodeObject(encoder npkg.ObjectEncoder) {
-	encoder.String("topic", m.Topic)
+	encoder.String("topic", m.Topic.String())
 	encoder.String("from_addr", m.FromAddr)
 	encoder.String("Bytes", nunsafe.Bytes2String(m.Bytes))
 	encoder.StringMap("meta_data", m.Metadata)
@@ -278,7 +315,7 @@ func (m Message) EncodeObject(encoder npkg.ObjectEncoder) {
 func (m Message) String() string {
 	var content strings.Builder
 	content.WriteString("topic: ")
-	content.WriteString(m.Topic)
+	content.WriteString(m.Topic.String())
 	content.WriteString(",")
 	content.WriteString("from: ")
 	content.WriteString(m.FromAddr)

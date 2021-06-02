@@ -22,7 +22,7 @@ func ParseAuthorization(val string) (authType string, token string, err error) {
 }
 
 // ParseTokens parses the base64 encoded token sent as part of the Authorization string,
-// It expects all parts of string to be seperated with ':', returning splitted slice.
+// It expects all parts of string to be separated with ':', returning split slice.
 func ParseTokens(val string) ([]string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(val)
 	if err != nil {

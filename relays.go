@@ -42,11 +42,11 @@ func (tm *PbRelay) Handle(ctx context.Context, message Message, transport Transp
 
 	logStack.New().LInfo().
 		Message("message received for topic").
-		String("topic", message.Topic).
+		String("topic", message.Topic.String()).
 		End()
 
 	tm.chl.RLock()
-	channels, hasChannel := tm.channels[message.Topic]
+	channels, hasChannel := tm.channels[message.Topic.String()]
 	tm.chl.RUnlock()
 
 	if !hasChannel {
@@ -55,7 +55,7 @@ func (tm *PbRelay) Handle(ctx context.Context, message Message, transport Transp
 
 	logStack.New().LInfo().
 		Message("notifying subscription of message").
-		String("topic", message.Topic).
+		String("topic", message.Topic.String()).
 		End()
 
 	for _, channel := range channels {
@@ -66,7 +66,7 @@ func (tm *PbRelay) Handle(ctx context.Context, message Message, transport Transp
 		if err := channel.Notify(ctx, message, transport); err != nil {
 			logStack.New().LInfo().Message("channel failed to handle message").
 				Error("error", err).
-				String("topic", message.Topic)
+				String("topic", message.Topic.String())
 			if message.Future != nil {
 				message.Future.WithError(err)
 			}
@@ -79,7 +79,7 @@ func (tm *PbRelay) Handle(ctx context.Context, message Message, transport Transp
 
 	logStack.New().LInfo().
 		Message("notified subscription of message").
-		String("topic", message.Topic).
+		String("topic", message.Topic.String()).
 		End()
 
 	return nil

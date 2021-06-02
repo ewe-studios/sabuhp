@@ -297,7 +297,7 @@ doLoop:
 					_ = copy(payload, dataLine)
 
 					message = sabuhp.Message{
-						Topic:       sc.request.URL.Path,
+						Topic:       sabuhp.T(sc.request.URL.Path),
 						Id:          nxid.New(),
 						Path:        sc.request.URL.Path,
 						ContentType: contentType,

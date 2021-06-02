@@ -826,7 +826,7 @@ func (g *GorillaSocket) manageReads() {
 			}))
 
 			var payload = &sabuhp.Message{
-				Topic:    info.Path,
+				Topic:    sabuhp.T(info.Path),
 				Id:       nxid.New(),
 				Path:     info.Path,
 				Query:    info.Query,
@@ -859,7 +859,7 @@ func (g *GorillaSocket) manageReads() {
 			}))
 
 			var payload = &sabuhp.Message{
-				Topic:    info.Path,
+				Topic:    sabuhp.T(info.Path),
 				Id:       nxid.New(),
 				Path:     info.Path,
 				Query:    info.Query,

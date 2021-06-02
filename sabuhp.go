@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/influx6/npkg/nthen"
+
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
 	"github.com/influx6/npkg/nnet"
@@ -224,6 +226,7 @@ func (t TransportResponseFunc) Handle(ctx context.Context, message Message, tr T
 type MessageBus interface {
 	Send(data ...Message)
 	Listen(topic string, grp string, handler TransportResponse) Channel
+	SendForReply(tm time.Duration, fromTopic Topic, replyGroup string, data ...Message) *nthen.Future
 }
 
 type (

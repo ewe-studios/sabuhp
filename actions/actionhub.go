@@ -112,7 +112,7 @@ type WorkerRequest struct {
 	// There are cases where we want a worker specific for a work group
 	// which can be used to hand off specific tasks to handle very
 	// special cases, this then allows specific and limited use
-	// around non-generalistic work group slaves.
+	// around non-generalist work group slaves.
 	//
 	// Example of such is a dangerous operation that is not intrinsic to
 	// the behaviour of the action but must be done, this can be offloaded

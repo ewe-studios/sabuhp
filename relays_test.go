@@ -15,7 +15,7 @@ func TestPbRelay(t *testing.T) {
 	var logger GoLogImpl
 	var mb BusBuilder
 
-	var reply = BasicMsg("hello", "hello ", "you")
+	var reply = BasicMsg(T("hello"), "hello ", "you")
 	var manager = NewPbRelay(controlCtx, logger)
 
 	var w sync.WaitGroup

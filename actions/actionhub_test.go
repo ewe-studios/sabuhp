@@ -65,7 +65,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		sendList = append(sendList, msgs...)
 		for _, channel := range channels {
 			for _, message := range msgs {
-				if channel.T == message.Topic {
+				if channel.T == message.Topic.String() {
 					_ = channel.Handler.Handle(context.Background(), message, sabuhp.Transport{Bus: &mb})
 				}
 			}
@@ -112,7 +112,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	require.Len(t, channels, 1)
 
 	mb.Send(sabuhp.Message{
-		Topic:    "say_hello",
+		Topic:    sabuhp.T("say_hello"),
 		FromAddr: "yay",
 		Bytes:    []byte("alex"),
 		Metadata: nil,
@@ -138,7 +138,7 @@ func sayHelloAction(ctx context.Context, ack chan struct{}) WorkGroupCreator {
 			var sub = job.Transport
 
 			sub.Bus.Send(sabuhp.Message{
-				Topic:    message.FromAddr,
+				Topic:    sabuhp.T(message.FromAddr),
 				FromAddr: to,
 				Bytes:    []byte("Hello"),
 				Metadata: nil,

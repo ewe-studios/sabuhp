@@ -267,7 +267,7 @@ func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
 //
 // Allow a mux to be used as a matcher and handler elsewhere.
 func (m *Mux) Match(msg *sabuhp.Message) bool {
-	var handler = m.trie.Search(msg.Topic, sabuhp.Params{})
+	var handler = m.trie.Search(msg.Topic.String(), sabuhp.Params{})
 	return handler != nil
 }
 

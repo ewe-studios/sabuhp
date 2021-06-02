@@ -55,7 +55,7 @@ func TestNewSSEHub(t *testing.T) {
 	require.NoError(t, socketErr)
 	require.NotNil(t, socket)
 
-	var subscribeMessage = testingutils.Msg("hello", "alex", "me")
+	var subscribeMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
 	var sendErr = socket.Send("POST", subscribeMessage, 0)
 	require.NoError(t, sendErr)
 
