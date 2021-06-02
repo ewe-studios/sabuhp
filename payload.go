@@ -37,8 +37,14 @@ type Topic struct {
 	R string
 }
 
+// T creates a topic with a 20 length random string suffix.
 func T(t string) Topic {
-	return NewTopic(t, nstr.RandomAlphabets(10))
+	return NewTopic(t, nstr.RandomAlphabets(20))
+}
+
+// TR allows creating a topic with a environment prefix and a 20 length random string suffix.
+func TR(env string, t string) Topic {
+	return NewTopic(fmt.Sprintf("%s.%s", env, t), nstr.RandomAlphabets(20))
 }
 
 func NewTopic(t string, r string) Topic {
