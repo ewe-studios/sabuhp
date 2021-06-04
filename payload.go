@@ -52,6 +52,16 @@ func TRS(env string, service string, t string) Topic {
 	return NewTopic(fmt.Sprintf("%s.%s.%s", env, service, t), nstr.RandomAlphabets(20))
 }
 
+type TopicPartial func(topicName string) Topic
+
+// CreateTopicPartial returns a TopicPartial which will always generate
+// a topic match the target TRS topic naming format: env.service.topic_name.
+func CreateTopicPartial(env string, service string) TopicPartial {
+	return func(topicName string) Topic {
+		return TRS(env, service, topicName)
+	}
+}
+
 func NewTopic(t string, r string) Topic {
 	return Topic{
 		T: t,
