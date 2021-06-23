@@ -70,26 +70,18 @@ func TestNewHub(t *testing.T) {
 
 	var httpServer = httptest.NewServer(servletServer)
 
-	var clientHub = NewClientSockets(controlCtx, 5, codec, httpServer.Client(), logger, linearBackOff)
-
-	var socket, socketErr = clientHub.For(
-		nxid.New(),
-		httpServer.URL,
-	)
-
-	require.NoError(t, socketErr)
-	require.NotNil(t, socket)
+	var socket = NewClient(controlCtx, nxid.New(), httpServer.URL, 5, "POST", codec, httpServer.Client(), logger, linearBackOff)
 
 	var topicMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
 	topicMessage.Future = nthen.NewFuture()
 
-	var ft = socket.Send("POST", topicMessage)
+	socket.Send(topicMessage)
 
-	ft.Wait()
+	topicMessage.Future.Wait()
 
-	require.NoError(t, ft.Err())
+	require.NoError(t, topicMessage.Future.Err())
 
-	var response = ft.Value().(sabuhp.Message)
+	var response = topicMessage.Future.Value().(sabuhp.Message)
 	require.Equal(t, "yay!", string(response.Bytes))
 
 	controlStopFunc()

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/influx6/npkg/nthen"
-
 	"github.com/influx6/npkg/njson"
 
 	"github.com/influx6/npkg/nxid"
@@ -21,49 +19,18 @@ import (
 	"github.com/ewe-studios/sabuhp/utils"
 )
 
-type MessageHandler func(message []byte, socket *SendClient) error
-
-type ClientSockets struct {
-	maxRetries int
-	codec      sabuhp.Codec
-	retryFunc  sabuhp.RetryFunc
-	ctx        context.Context
-	client     *http.Client
-	logging    sabuhp.Logger
-}
-
-func NewClientSockets(
-	ctx context.Context,
-	maxRetries int,
-	codec sabuhp.Codec,
-	client *http.Client,
-	logging sabuhp.Logger,
-	retryFn sabuhp.RetryFunc,
-) *ClientSockets {
-	if client.CheckRedirect == nil {
-		client.CheckRedirect = utils.CheckRedirect
-	}
-	return &ClientSockets{ctx: ctx, codec: codec, maxRetries: maxRetries, client: client, retryFunc: retryFn, logging: logging}
-}
-
-func (se *ClientSockets) For(
-	id nxid.ID,
-	route string,
-) (*SendClient, error) {
-	return NewClient(se.ctx, id, route, se.maxRetries, se.codec, se.retryFunc, se.logging, se.client), nil
-}
-
 type SendClient struct {
-	maxRetries int
-	id         nxid.ID
-	route      string
-	codec      sabuhp.Codec
-	logger     sabuhp.Logger
-	retryFunc  sabuhp.RetryFunc
-	ctx        context.Context
-	client     *http.Client
-	lastId     nxid.ID
-	retry      time.Duration
+	maxRetries    int
+	id            nxid.ID
+	Route         string
+	RequestMethod string
+	codec         sabuhp.Codec
+	logger        sabuhp.Logger
+	retryFunc     sabuhp.RetryFunc
+	ctx           context.Context
+	client        *http.Client
+	lastId        nxid.ID
+	retry         time.Duration
 }
 
 func NewClient(
@@ -71,31 +38,60 @@ func NewClient(
 	id nxid.ID,
 	route string,
 	maxRetries int,
+	method string,
 	codec sabuhp.Codec,
 	retryFn sabuhp.RetryFunc,
 	logger sabuhp.Logger,
 	reqClient *http.Client,
 ) *SendClient {
-	var client = &SendClient{
-		id:         id,
-		route:      route,
-		codec:      codec,
-		maxRetries: maxRetries,
-		logger:     logger,
-		client:     reqClient,
-		retryFunc:  retryFn,
-		ctx:        ctx,
-		retry:      0,
+	if reqClient.CheckRedirect == nil {
+		reqClient.CheckRedirect = utils.CheckRedirect
 	}
-
+	var client = &SendClient{
+		id:            id,
+		Route:         route,
+		codec:         codec,
+		maxRetries:    maxRetries,
+		logger:        logger,
+		RequestMethod: method,
+		client:        reqClient,
+		retryFunc:     retryFn,
+		ctx:           ctx,
+		retry:         0,
+	}
 	return client
 }
 
-func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
-	var ft = msg.Future
-	if msg.Future == nil {
-		ft = nthen.NewFuture()
+func (sc *SendClient) CloneForMethod(method string) *SendClient {
+	var scClone = *sc
+	scClone.RequestMethod = method
+	return &scClone
+}
+
+func (sc *SendClient) Close() {
+	// do nothing
+}
+
+func (sc *SendClient) Stop() {
+	// do nothing
+}
+
+func (sc *SendClient) Start() {
+	// do nothing
+}
+
+func (sc *SendClient) Send(msgs ...sabuhp.Message) {
+	for _, msg := range msgs {
+		if err := sc.SendMessageAsMethod(sc.RequestMethod, msg); err != nil {
+			if msg.Future != nil {
+				msg.Future.WithError(err)
+			}
+		}
 	}
+}
+
+func (sc *SendClient) SendMessageAsMethod(method string, msg sabuhp.Message) error {
+	var ft = msg.Future
 
 	var timeout = msg.Within
 	var header = sabuhp.Header{}
@@ -117,19 +113,21 @@ func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
 
 	var payload, payloadErr = sc.codec.Encode(msg)
 	if payloadErr != nil {
-		ft.WithError(nerror.WrapOnly(payloadErr))
-		return ft
+		return nerror.WrapOnly(payloadErr)
 	}
 
 	var req, response, err = sc.try(method, header, bytes.NewBuffer(payload), ctx)
 	if err != nil {
-		ft.WithError(err)
-		return ft
+		return err
 	}
 
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		ft.WithError(nerror.New("failed to request [Status Code: %d]", response.StatusCode))
-		return ft
+		return nerror.New("failed to request [Status Code: %d]", response.StatusCode)
+	}
+
+	// if no future is attached then dont read response, but close and end here
+	if ft == nil {
+		return response.Body.Close()
 	}
 
 	njson.Log(sc.logger).New().
@@ -146,7 +144,6 @@ func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
 	var responseBody = bytes.NewBuffer(make([]byte, 0, 512))
 	if _, readErr := io.Copy(responseBody, response.Body); readErr != nil {
 		var wrappedErr = nerror.WrapOnly(readErr)
-		ft.WithError(wrappedErr)
 		njson.Log(sc.logger).New().
 			LError().
 			Message("failed to read response").
@@ -158,7 +155,7 @@ func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
 			Int("response_status_code", response.StatusCode).
 			Error("error", wrappedErr).
 			End()
-		return ft
+		return wrappedErr
 	}
 
 	if closeErr := response.Body.Close(); closeErr != nil {
@@ -168,8 +165,7 @@ func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
 			String("error", nerror.WrapOnly(err).Error()).
 			End()
 
-		ft.WithError(closeErr)
-		return ft
+		return nerror.WrapOnly(closeErr)
 	}
 
 	var contentType = response.Header.Get("Content-Type")
@@ -188,20 +184,20 @@ func (sc *SendClient) Send(method string, msg sabuhp.Message) *nthen.Future {
 			Metadata:    map[string]string{},
 			Params:      map[string]string{},
 		})
-		return ft
+		return nil
 	}
 
 	var responseMessage, responseMsgErr = sc.codec.Decode(responseBody.Bytes())
 	if responseMsgErr != nil {
-		ft.WithError(nerror.WrapOnly(responseMsgErr))
-		return ft
+		return nerror.WrapOnly(responseMsgErr)
 	}
+
 	if len(responseMessage.Path) == 0 {
 		responseMessage.Path = req.URL.Path
 	}
 
 	ft.WithValue(responseMessage)
-	return ft
+	return nil
 }
 
 func (sc *SendClient) try(method string, header sabuhp.Header, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {
@@ -216,7 +212,7 @@ func (sc *SendClient) try(method string, header sabuhp.Header, body io.Reader, c
 			ctx,
 			sc.client,
 			method,
-			sc.route,
+			sc.Route,
 			body,
 			http.Header(header),
 		)

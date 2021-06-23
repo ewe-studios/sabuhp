@@ -86,6 +86,7 @@ func (se *SSEHub) For(
 	return NewSSEClient(
 		id,
 		se.maxRetries,
+		method,
 		handler,
 		req,
 		response,
@@ -99,6 +100,7 @@ func (se *SSEHub) For(
 type SSEClient struct {
 	id         nxid.ID
 	maxRetries int
+	method     string
 	logger     sabuhp.Logger
 	retryFunc  sabuhp.RetryFunc
 	codec      sabuhp.Codec
@@ -116,6 +118,7 @@ type SSEClient struct {
 func NewSSEClient(
 	id nxid.ID,
 	maxRetries int,
+	method string,
 	handler MessageHandler,
 	req *http.Request,
 	res *http.Response,
@@ -131,6 +134,7 @@ func NewSSEClient(
 	var newCtx, canceler = context.WithCancel(req.Context())
 	var client = &SSEClient{
 		id:         id,
+		method:     method,
 		codec:      codec,
 		maxRetries: maxRetries,
 		logger:     logger,
@@ -154,7 +158,17 @@ func (sc *SSEClient) Wait() {
 	sc.waiter.Wait()
 }
 
-func (sc *SSEClient) Send(method string, msg sabuhp.Message, timeout time.Duration) error {
+func (sc *SSEClient) Send(msgs ...sabuhp.Message) {
+	for _, msg := range msgs {
+		if err := sc.SendAsMethod(sc.method, msg); err != nil {
+			if msg.Future != nil {
+				msg.Future.WithError(err)
+			}
+		}
+	}
+}
+
+func (sc *SSEClient) SendAsMethod(method string, msg sabuhp.Message) error {
 	var header = http.Header{}
 	for k, v := range msg.Headers {
 		header[k] = v
@@ -168,11 +182,10 @@ func (sc *SSEClient) Send(method string, msg sabuhp.Message, timeout time.Durati
 
 	var ctx = sc.ctx
 	var canceler context.CancelFunc
-	if timeout > 0 {
-		ctx, canceler = context.WithTimeout(sc.ctx, timeout)
+	if msg.Within > 0 {
+		ctx, canceler = context.WithTimeout(sc.ctx, msg.Within)
 	} else {
-		canceler = func() {
-		}
+		canceler = func() {}
 	}
 
 	defer canceler()
@@ -217,6 +230,14 @@ func (sc *SSEClient) Send(method string, msg sabuhp.Message, timeout time.Durati
 		End()
 
 	return nil
+}
+
+func (sc *SSEClient) Start() {
+	// do nothing
+}
+
+func (sc *SSEClient) Stop() {
+	_ = sc.Close()
 }
 
 // Close closes client's request and response cycle
@@ -391,5 +412,4 @@ func (sc *SSEClient) reconnect() {
 		go sc.run()
 		return
 	}
-
 }
