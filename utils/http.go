@@ -2,9 +2,11 @@ package utils
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"time"
 
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/nerror"
@@ -25,8 +27,6 @@ func CreateError(w io.Writer, err error, message string, code int) error {
 	return nil
 }
 
-// Go's http package doesn't copy headers across when it encounters
-// redirects so we need to do that manually.
 func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return nerror.New("stopped after 10 redirects")
@@ -39,10 +39,18 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+func CreateDefaultHttpClient() *http.Client {
+	var client http.Client
+	client.Timeout = time.Second * 3
+	client.CheckRedirect = CheckRedirect
+	return &client
+}
+
+
 // DoRequest makes a request for giving parameters.
 func DoRequest(
 	ctx context.Context,
-	client *http.Client,
+	client sabuhp.HttpClient,
 	method string,
 	route string,
 	body io.Reader,

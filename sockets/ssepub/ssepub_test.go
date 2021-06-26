@@ -3,16 +3,12 @@ package ssepub
 import (
 	"context"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"github.com/stretchr/testify/require"
-
-	"github.com/ewe-studios/sabuhp/codecs"
-	"github.com/influx6/npkg/nxid"
 
 	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/codecs"
 	"github.com/ewe-studios/sabuhp/testingutils"
 )
 
@@ -37,10 +33,11 @@ func TestNewSSEHub(t *testing.T) {
 
 	var httpServer = httptest.NewServer(sseServer)
 
-	var clientHub = NewSSEHub(controlCtx, 5, httpServer.Client(), codec, logger, linearBackOff)
-
 	var recvMsg = make(chan sabuhp.Message, 1)
-	var socket, socketErr = clientHub.Get(
+	var socket, err = NewSSEClient2(
+		controlCtx,
+		httpServer.URL,
+		"GET",
 		func(b sabuhp.Message, socket *SSEClient) error {
 			fmt.Println("Received response: ", b.Bytes, b.Topic)
 			require.NotEmpty(t, b)
@@ -48,16 +45,14 @@ func TestNewSSEHub(t *testing.T) {
 			recvMsg <- b
 			return nil
 		},
-		nxid.New(),
-		httpServer.URL,
+		codec,
+		logger,
+		httpServer.Client(),
 	)
-
-	require.NoError(t, socketErr)
-	require.NotNil(t, socket)
+	require.NoError(t, err)
 
 	var subscribeMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
-	var sendErr = socket.Send("POST", subscribeMessage, 0)
-	require.NoError(t, sendErr)
+	socket.Send(subscribeMessage)
 
 	var okMessage = <-recvMsg
 	require.NotNil(t, okMessage)
@@ -67,8 +62,4 @@ func TestNewSSEHub(t *testing.T) {
 
 	httpServer.Close()
 	socket.Wait()
-}
-
-func linearBackOff(i int) time.Duration {
-	return time.Duration(i) * (10 * time.Millisecond)
 }

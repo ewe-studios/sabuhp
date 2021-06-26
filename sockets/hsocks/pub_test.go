@@ -3,11 +3,9 @@ package hsocks
 import (
 	"context"
 	"fmt"
+	"github.com/influx6/npkg/nthen"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"github.com/influx6/npkg/nthen"
 
 	"github.com/stretchr/testify/require"
 
@@ -70,7 +68,17 @@ func TestNewHub(t *testing.T) {
 
 	var httpServer = httptest.NewServer(servletServer)
 
-	var socket = NewClient(controlCtx, nxid.New(), httpServer.URL, 5, "POST", codec, httpServer.Client(), logger, linearBackOff)
+	var socket = NewClient(
+		controlCtx,
+		nxid.New(),
+		httpServer.URL,
+		5,
+		"POST",
+		codec,
+		linearBackOff,
+		logger,
+		httpServer.Client(),
+	)
 
 	var topicMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
 	topicMessage.Future = nthen.NewFuture()
@@ -87,8 +95,4 @@ func TestNewHub(t *testing.T) {
 	controlStopFunc()
 
 	httpServer.Close()
-}
-
-func linearBackOff(i int) time.Duration {
-	return time.Duration(i) * (10 * time.Millisecond)
 }

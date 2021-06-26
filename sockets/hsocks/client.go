@@ -28,9 +28,34 @@ type SendClient struct {
 	logger        sabuhp.Logger
 	retryFunc     sabuhp.RetryFunc
 	ctx           context.Context
-	client        *http.Client
+	client        sabuhp.HttpClient
 	lastId        nxid.ID
 	retry         time.Duration
+}
+
+func linearBackOff(i int) time.Duration {
+	return time.Duration(i) * (10 * time.Millisecond)
+}
+
+func CreateClient(
+	ctx context.Context,
+	addr string,
+	method string,
+	codec sabuhp.Codec,
+	logger sabuhp.Logger,
+	client sabuhp.HttpClient,
+) *SendClient {
+	return NewClient(ctx, nxid.New(), addr, 5, method, codec, linearBackOff, logger, client)
+}
+
+func CreateClient2(
+	ctx context.Context,
+	addr string,
+	method string,
+	codec sabuhp.Codec,
+	logger sabuhp.Logger,
+) *SendClient {
+	return NewClient(ctx, nxid.New(), addr, 5, method, codec, linearBackOff, logger, utils.CreateDefaultHttpClient())
 }
 
 func NewClient(
@@ -42,11 +67,8 @@ func NewClient(
 	codec sabuhp.Codec,
 	retryFn sabuhp.RetryFunc,
 	logger sabuhp.Logger,
-	reqClient *http.Client,
+	reqClient sabuhp.HttpClient,
 ) *SendClient {
-	if reqClient.CheckRedirect == nil {
-		reqClient.CheckRedirect = utils.CheckRedirect
-	}
 	var client = &SendClient{
 		id:            id,
 		Route:         route,
@@ -66,6 +88,10 @@ func (sc *SendClient) CloneForMethod(method string) *SendClient {
 	var scClone = *sc
 	scClone.RequestMethod = method
 	return &scClone
+}
+
+func (sc *SendClient) ID() nxid.ID {
+	return sc.id
 }
 
 func (sc *SendClient) Close() {

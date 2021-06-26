@@ -20,6 +20,10 @@ type HttpEncoder interface {
 	Encode(req http.ResponseWriter, message Message) error
 }
 
+type HttpClient interface {
+	 Do(req *http.Request) (*http.Response, error)
+}
+
 type HttpEncoderImpl struct {
 	Codec  Codec
 	Logger Logger

@@ -29,74 +29,6 @@ var (
 
 type MessageHandler func(message sabuhp.Message, socket *SSEClient) error
 
-type SSEHub struct {
-	maxRetries int
-	codec      sabuhp.Codec
-	retryFunc  sabuhp.RetryFunc
-	ctx        context.Context
-	client     *http.Client
-	logging    sabuhp.Logger
-}
-
-func NewSSEHub(
-	ctx context.Context,
-	maxRetries int,
-	client *http.Client,
-	codec sabuhp.Codec,
-	logging sabuhp.Logger,
-	retryFn sabuhp.RetryFunc,
-) *SSEHub {
-	if client.CheckRedirect == nil {
-		client.CheckRedirect = utils.CheckRedirect
-	}
-	return &SSEHub{
-		ctx:        ctx,
-		codec:      codec,
-		maxRetries: maxRetries,
-		client:     client,
-		retryFunc:  retryFn,
-		logging:    logging,
-	}
-}
-
-func (se *SSEHub) Get(handler MessageHandler, id nxid.ID, route string, lastEventIds ...string) (*SSEClient, error) {
-	return se.For(handler, id, "GET", route, lastEventIds...)
-}
-
-func (se *SSEHub) For(
-	handler MessageHandler,
-	id nxid.ID,
-	method string,
-	route string,
-	lastEventIds ...string,
-) (*SSEClient, error) {
-	var header = http.Header{}
-	header.Set(ClientIdentificationHeader, id.String())
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Accept", "text/event-stream")
-	if len(lastEventIds) > 0 {
-		header.Set(LastEventIdListHeader, strings.Join(lastEventIds, ";"))
-	}
-
-	var req, response, err = utils.DoRequest(se.ctx, se.client, method, route, nil, header)
-	if err != nil {
-		return nil, nerror.WrapOnly(err)
-	}
-
-	return NewSSEClient(
-		id,
-		se.maxRetries,
-		method,
-		handler,
-		req,
-		response,
-		se.retryFunc,
-		se.codec,
-		se.logging,
-		se.client,
-	), nil
-}
-
 type SSEClient struct {
 	id         nxid.ID
 	maxRetries int
@@ -107,15 +39,102 @@ type SSEClient struct {
 	handler    MessageHandler // ensure to copy the bytes if your use will span multiple goroutines
 	ctx        context.Context
 	canceler   context.CancelFunc
-	client     *http.Client
+	client     sabuhp.HttpClient
 	request    *http.Request
 	response   *http.Response
 	lastId     nxid.ID
 	retry      time.Duration
 	waiter     sync.WaitGroup
 }
+func linearBackOff(i int) time.Duration {
+	return time.Duration(i) * (10 * time.Millisecond)
+}
+
+
+func NewSSEClient3(
+	ctx context.Context,
+	route string,
+	method string,
+	handler MessageHandler,
+	codec sabuhp.Codec,
+	logger sabuhp.Logger,
+) (*SSEClient, error) {
+	return NewSSEClient(
+		ctx,
+		nxid.New(),
+		5,
+		route,
+		method,
+		handler,
+		linearBackOff,
+		codec,
+		logger,
+		utils.CreateDefaultHttpClient(),
+	)
+}
+
+func NewSSEClient2(
+	ctx context.Context,
+	route string,
+	method string,
+	handler MessageHandler,
+	codec sabuhp.Codec,
+	logger sabuhp.Logger,
+	reqClient sabuhp.HttpClient,
+) (*SSEClient, error) {
+	return NewSSEClient(
+		ctx,
+		nxid.New(),
+		5,
+		route,
+		method,
+		handler,
+		linearBackOff,
+		codec,
+		logger,
+		reqClient,
+	)
+}
 
 func NewSSEClient(
+	ctx context.Context,
+	id nxid.ID,
+	maxRetries int,
+	route string,
+	method string,
+	handler MessageHandler,
+	retryFn sabuhp.RetryFunc,
+	codec sabuhp.Codec,
+	logger sabuhp.Logger,
+	reqClient sabuhp.HttpClient,
+) (*SSEClient, error) {
+	var header = http.Header{}
+	header.Set(ClientIdentificationHeader, id.String())
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Accept", "text/event-stream")
+
+	var req, response, err = utils.DoRequest(ctx, reqClient, method, route, nil, header)
+	if err != nil {
+		return nil, nerror.WrapOnly(err)
+	}
+
+	return NewSSEClientWithRequestResponse(
+		ctx,
+		id,
+		maxRetries,
+		method,
+		handler,
+		req,
+		response,
+		retryFn,
+		codec,
+		logger,
+		reqClient,
+	), nil
+}
+
+func NewSSEClientWithRequestResponse(
+	ctx context.Context,
 	id nxid.ID,
 	maxRetries int,
 	method string,
@@ -125,13 +144,13 @@ func NewSSEClient(
 	retryFn sabuhp.RetryFunc,
 	codec sabuhp.Codec,
 	logger sabuhp.Logger,
-	reqClient *http.Client,
+	reqClient sabuhp.HttpClient,
 ) *SSEClient {
 	if req.Context() == nil {
 		panic("Request is required to have a context.Context attached")
 	}
 
-	var newCtx, canceler = context.WithCancel(req.Context())
+	var newCtx, canceler = context.WithCancel(ctx)
 	var client = &SSEClient{
 		id:         id,
 		method:     method,
@@ -236,6 +255,10 @@ func (sc *SSEClient) Start() {
 	// do nothing
 }
 
+func (sc *SSEClient) ID() nxid.ID {
+	return sc.id
+}
+
 func (sc *SSEClient) Stop() {
 	_ = sc.Close()
 }
@@ -255,6 +278,7 @@ func (sc *SSEClient) run() {
 	var contentType string
 	var decoding = false
 	var data bytes.Buffer
+
 doLoop:
 	for {
 		select {
