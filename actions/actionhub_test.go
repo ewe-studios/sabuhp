@@ -2,13 +2,12 @@ package actions
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"testing"
 	"time"
 
 	"github.com/ewe-studios/sabuhp/injectors"
 	"github.com/ewe-studios/sabuhp/testingutils"
-
-	"github.com/ewe-studios/sabuhp"
 
 	"github.com/stretchr/testify/require"
 )
@@ -19,17 +18,17 @@ func TestNewActionHub_StartStop(t *testing.T) {
 		require.NotNil(t, hub)
 	}
 
-	var mb sabuhp.BusBuilder
-	var sendList []sabuhp.Message
+	var mb sabu.BusBuilder
+	var sendList []sabu.Message
 	var logger = &testingutils.LoggerPub{}
-	mb.SendFunc = func(msgs ...sabuhp.Message) {
+	mb.SendFunc = func(msgs ...sabu.Message) {
 		sendList = append(sendList, msgs...)
 	}
 
 	var injector = injectors.NewInjector()
 	var templateRegistry = NewWorkerTemplateRegistry()
 	var ctx, canceler = context.WithCancel(context.Background())
-	var relay = sabuhp.NewBusRelay(ctx, logger, &mb)
+	var relay = sabu.NewBusRelay(ctx, logger, &mb)
 	var hub = NewActionHub(
 		ctx,
 		escalationHandling,
@@ -56,17 +55,17 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 		require.NotNil(t, hub)
 	}
 
-	var mb sabuhp.BusBuilder
-	var sendList []sabuhp.Message
+	var mb sabu.BusBuilder
+	var sendList []sabu.Message
 	var channels []testingutils.SubChannel
 
 	var logger = &testingutils.LoggerPub{}
-	mb.SendFunc = func(msgs ...sabuhp.Message) {
+	mb.SendFunc = func(msgs ...sabu.Message) {
 		sendList = append(sendList, msgs...)
 		for _, channel := range channels {
 			for _, message := range msgs {
 				if channel.T == message.Topic.String() {
-					_ = channel.Handler.Handle(context.Background(), message, sabuhp.Transport{Bus: &mb})
+					_ = channel.Handler.Handle(context.Background(), message, sabu.Transport{Bus: &mb})
 				}
 			}
 		}
@@ -74,7 +73,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	}
 
 	var addedChannel = make(chan struct{}, 1)
-	mb.ListenFunc = func(topic string, group string, callback sabuhp.TransportResponse) sabuhp.Channel {
+	mb.ListenFunc = func(topic string, group string, callback sabu.TransportResponse) sabu.Channel {
 		var noChannel testingutils.SubChannel
 		noChannel.Handler = callback
 		noChannel.T = topic
@@ -85,7 +84,7 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	}
 
 	var ctx, canceler = context.WithCancel(context.Background())
-	var relay = sabuhp.NewBusRelay(ctx, logger, &mb)
+	var relay = sabu.NewBusRelay(ctx, logger, &mb)
 
 	var ack = make(chan struct{}, 1)
 	var injector = injectors.NewInjector()
@@ -111,8 +110,8 @@ func TestNewActionHub_WithTemplateRegistry(t *testing.T) {
 	<-addedChannel
 	require.Len(t, channels, 1)
 
-	mb.Send(sabuhp.Message{
-		Topic:    sabuhp.T("say_hello"),
+	mb.Send(sabu.Message{
+		Topic:    sabu.T("say_hello"),
 		FromAddr: "yay",
 		Bytes:    []byte("alex"),
 		Metadata: nil,
@@ -137,8 +136,8 @@ func sayHelloAction(ctx context.Context, ack chan struct{}) WorkGroupCreator {
 			var message = job.Msg
 			var sub = job.Transport
 
-			sub.Bus.Send(sabuhp.Message{
-				Topic:    sabuhp.T(message.FromAddr),
+			sub.Bus.Send(sabu.Message{
+				Topic:    sabu.T(message.FromAddr),
 				FromAddr: to,
 				Bytes:    []byte("Hello"),
 				Metadata: nil,

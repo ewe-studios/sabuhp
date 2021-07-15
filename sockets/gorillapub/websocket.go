@@ -3,6 +3,7 @@ package gorillapub
 import (
 	"bytes"
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"io"
 	"net"
 	"net/http"
@@ -19,7 +20,6 @@ import (
 
 	"github.com/ewe-studios/websocket"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/utils"
 )
 
@@ -58,11 +58,11 @@ type ResponseHeadersFromRequest func(r *http.Request) http.Header
 type SocketInfo struct {
 	Query   url.Values
 	Path    string
-	Headers sabuhp.Header
+	Headers sabu.Header
 }
 
 func HttpUpgrader(
-	logger sabuhp.Logger,
+	logger sabu.Logger,
 	hub *GorillaHub,
 	upgrader *websocket.Upgrader,
 	custom ResponseHeadersFromRequest,
@@ -108,7 +108,7 @@ func HttpUpgrader(
 		var info = &SocketInfo{
 			Path:    request.URL.Path,
 			Query:   request.URL.Query(),
-			Headers: sabuhp.Header(request.Header.Clone()),
+			Headers: sabu.Header(request.Header.Clone()),
 		}
 
 		var socketHandler = hub.HandleSocket(socket, info)
@@ -138,12 +138,12 @@ func HttpUpgrader(
 }
 
 func UpgraderHandler(
-	logger sabuhp.Logger,
+	logger sabu.Logger,
 	hub *GorillaHub,
 	upgrader *websocket.Upgrader,
 	custom ResponseHeadersFromRequest,
-) sabuhp.Handler {
-	return sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+) sabu.Handler {
+	return sabu.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 		var customHeaders http.Header
 		if custom != nil {
 			customHeaders = custom(request)
@@ -177,7 +177,7 @@ func UpgraderHandler(
 		var info = &SocketInfo{
 			Path:    request.URL.Path,
 			Query:   request.URL.Query(),
-			Headers: sabuhp.Header(request.Header.Clone()),
+			Headers: sabu.Header(request.Header.Clone()),
 		}
 
 		var socketHandler = hub.HandleSocket(socket, info)
@@ -211,8 +211,8 @@ type ConfigCreator func(config SocketConfig) SocketConfig
 
 type HubConfig struct {
 	Ctx           context.Context
-	Logger        sabuhp.Logger
-	Codec         sabuhp.Codec
+	Logger        sabu.Logger
+	Codec         sabu.Codec
 	ConfigHandler ConfigCreator
 }
 
@@ -225,7 +225,7 @@ type GorillaHub struct {
 	starter  *sync.Once
 	ender    *sync.Once
 	sockets  map[nxid.ID]*GorillaSocket
-	streams  *sabuhp.SocketServers
+	streams  *sabu.SocketServers
 }
 
 // ManagedGorillaHub returns a new instance of a gorilla hub which uses a managers.Manager
@@ -236,9 +236,9 @@ type GorillaHub struct {
 // to communicate to other services and back to the connections.
 func ManagedGorillaHub(
 	ctx context.Context,
-	logger sabuhp.Logger,
+	logger sabu.Logger,
 	optionalConfigCreator ConfigCreator,
-	codec sabuhp.Codec,
+	codec sabu.Codec,
 ) *GorillaHub {
 	return NewGorillaHub(HubConfig{
 		Logger:        logger,
@@ -254,7 +254,7 @@ func NewGorillaHub(config HubConfig) *GorillaHub {
 		config:   config,
 		ctx:      newCtx,
 		canceler: canceler,
-		streams:  sabuhp.NewSocketServers(),
+		streams:  sabu.NewSocketServers(),
 	}
 	hub.init()
 	return hub
@@ -289,7 +289,7 @@ func (gh *GorillaHub) Stop() {
 	})
 }
 
-func (gh *GorillaHub) Stream(stream sabuhp.SocketService) {
+func (gh *GorillaHub) Stream(stream sabu.SocketService) {
 	gh.streams.Stream(stream)
 }
 
@@ -381,10 +381,10 @@ func (gh *GorillaHub) HandleSocket(socket *websocket.Conn, info *SocketInfo) Soc
 	}
 }
 
-func (gh *GorillaHub) Stats() ([]sabuhp.SocketStat, error) {
-	var statChan = make(chan []sabuhp.SocketStat, 1)
+func (gh *GorillaHub) Stats() ([]sabu.SocketStat, error) {
+	var statChan = make(chan []sabu.SocketStat, 1)
 	var doAction = func() {
-		var stats []sabuhp.SocketStat
+		var stats []sabu.SocketStat
 		for _, socket := range gh.sockets {
 			stats = append(stats, socket.Stat())
 		}
@@ -436,8 +436,8 @@ type SocketConfig struct {
 	ReconnectionCheckWait time.Duration
 	PingInterval          time.Duration // should be lesser than ReadMessageWait duration
 	Ctx                   context.Context
-	Logger                sabuhp.Logger
-	Codec                 sabuhp.Codec
+	Logger                sabu.Logger
+	Codec                 sabu.Codec
 
 	// You can supply the websocket.Conn aif you wish to
 	// use an existing connection, the endpoint becomes
@@ -448,7 +448,7 @@ type SocketConfig struct {
 	// Client related fields
 	Res      *http.Response // optional
 	MaxRetry int
-	RetryFn  sabuhp.RetryFunc
+	RetryFn  sabu.RetryFunc
 	Endpoint Endpoint
 
 	// SocketByteHandler defines the function contract a GorillaSocket uses
@@ -458,7 +458,7 @@ type SocketConfig struct {
 	// will cause the immediate closure of that socket and ending communication
 	// with the server. So unless your intention is to
 	// end the connection, handle the error yourself.
-	Handler sabuhp.SocketMessageHandler
+	Handler sabu.SocketMessageHandler
 }
 
 func (s *SocketConfig) clientConnect(ctx context.Context) error {
@@ -534,7 +534,7 @@ func (s *SocketConfig) ensure() {
 	}
 }
 
-var _ sabuhp.Socket = (*GorillaSocket)(nil)
+var _ sabu.Socket = (*GorillaSocket)(nil)
 
 type GorillaSocket struct {
 	id           nxid.ID
@@ -542,10 +542,10 @@ type GorillaSocket struct {
 	isClient     bool
 	canceler     context.CancelFunc
 	ctx          context.Context
-	pending      chan *sabuhp.Message
-	send         chan *sabuhp.Message
-	deliver      chan *sabuhp.Message
-	handler      *sabuhp.Sock
+	pending      chan *sabu.Message
+	send         chan *sabu.Message
+	deliver      chan *sabu.Message
+	handler      *sabu.Sock
 	waiter       sync.WaitGroup
 	starter      sync.Once
 	ender        sync.Once
@@ -558,7 +558,7 @@ type GorillaSocket struct {
 	handled      int64
 }
 
-func (g *GorillaSocket) Listen(handler sabuhp.SocketMessageHandler) {
+func (g *GorillaSocket) Listen(handler sabu.SocketMessageHandler) {
 	g.handler.Use(handler)
 }
 
@@ -584,10 +584,10 @@ func GorillaClient(config SocketConfig) (*GorillaSocket, error) {
 	wg.socket = config.Conn
 	wg.config = &config
 	wg.id = nxid.New()
-	wg.handler = sabuhp.NewSock(config.Handler)
-	wg.pending = make(chan *sabuhp.Message, config.Buffer)
-	wg.send = make(chan *sabuhp.Message, config.Buffer)
-	wg.deliver = make(chan *sabuhp.Message, config.Buffer)
+	wg.handler = sabu.NewSock(config.Handler)
+	wg.pending = make(chan *sabu.Message, config.Buffer)
+	wg.send = make(chan *sabu.Message, config.Buffer)
+	wg.deliver = make(chan *sabu.Message, config.Buffer)
 	wg.canceler = canceler
 	wg.ctx = localCtx
 	return &wg, nil
@@ -600,10 +600,10 @@ func NewGorillaSocket(config SocketConfig) *GorillaSocket {
 	wg.socket = config.Conn
 	wg.config = &config
 	wg.id = nxid.New()
-	wg.handler = sabuhp.NewSock(config.Handler)
-	wg.pending = make(chan *sabuhp.Message, config.Buffer)
-	wg.send = make(chan *sabuhp.Message, config.Buffer)
-	wg.deliver = make(chan *sabuhp.Message, config.Buffer)
+	wg.handler = sabu.NewSock(config.Handler)
+	wg.pending = make(chan *sabu.Message, config.Buffer)
+	wg.send = make(chan *sabu.Message, config.Buffer)
+	wg.deliver = make(chan *sabu.Message, config.Buffer)
 	wg.canceler = canceler
 	wg.ctx = localCtx
 	return &wg
@@ -624,7 +624,7 @@ func (g *GorillaSocket) Wait() {
 }
 
 // Send delivers provided message into a batch of messages for delivery.
-func (g *GorillaSocket) Send(messages ...sabuhp.Message) {
+func (g *GorillaSocket) Send(messages ...sabu.Message) {
 	for _, message := range messages {
 		select {
 		case g.send <- &message:
@@ -650,8 +650,8 @@ func (g *GorillaSocket) RemoteAddr() net.Addr {
 	return g.socket.RemoteAddr()
 }
 
-func (g *GorillaSocket) Stat() sabuhp.SocketStat {
-	var stat sabuhp.SocketStat
+func (g *GorillaSocket) Stat() sabu.SocketStat {
+	var stat sabu.SocketStat
 	stat.Id = g.id.String()
 	stat.Addr = g.socket.LocalAddr()
 	stat.RemoteAddr = g.socket.RemoteAddr()
@@ -825,14 +825,14 @@ func (g *GorillaSocket) manageReads() {
 				event.String("socket_sub_protocols", g.socket.Subprotocol())
 			}))
 
-			var payload = &sabuhp.Message{
-				Topic:    sabuhp.T(info.Path),
+			var payload = &sabu.Message{
+				Topic:    sabu.T(info.Path),
 				Id:       nxid.New(),
 				Path:     info.Path,
 				Query:    info.Query,
 				Form:     url.Values{},
-				Headers:  sabuhp.Header{},
-				Cookies:  sabuhp.ReadCookies(info.Headers, ""),
+				Headers:  sabu.Header{},
+				Cookies:  sabu.ReadCookies(info.Headers, ""),
 				Bytes:    message,
 				Metadata: map[string]string{},
 				Params:   map[string]string{},
@@ -858,14 +858,14 @@ func (g *GorillaSocket) manageReads() {
 				event.String("socket_sub_protocols", g.socket.Subprotocol())
 			}))
 
-			var payload = &sabuhp.Message{
-				Topic:    sabuhp.T(info.Path),
+			var payload = &sabu.Message{
+				Topic:    sabu.T(info.Path),
 				Id:       nxid.New(),
 				Path:     info.Path,
 				Query:    info.Query,
 				Form:     url.Values{},
-				Headers:  sabuhp.Header{},
-				Cookies:  sabuhp.ReadCookies(info.Headers, ""),
+				Headers:  sabu.Header{},
+				Cookies:  sabu.ReadCookies(info.Headers, ""),
 				Bytes:    rest,
 				Metadata: map[string]string{},
 				Params:   map[string]string{},
@@ -1315,7 +1315,7 @@ runloop:
 
 			// attempt to delivery message and those pending
 			pendingMessages = len(g.send)
-			var collectedMessage = make([]*sabuhp.Message, pendingMessages)
+			var collectedMessage = make([]*sabu.Message, pendingMessages)
 
 			for i := 0; i < pendingMessages; i++ {
 				var pendingMsg = <-g.send
@@ -1441,9 +1441,9 @@ runloop:
 	g.canceler()
 }
 
-func (g *GorillaSocket) messageToWriter(message *sabuhp.Message, writer io.Writer) error {
+func (g *GorillaSocket) messageToWriter(message *sabu.Message, writer io.Writer) error {
 	var writeErr error
-	if message.ContentType != sabuhp.MessageContentType {
+	if message.ContentType != sabu.MessageContentType {
 		_, writeErr = writer.Write(anyMessageWSHeader)
 		if writeErr != nil {
 			var wrapped = nerror.WrapOnly(writeErr)

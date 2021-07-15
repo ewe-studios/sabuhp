@@ -1,10 +1,9 @@
 package testingutils
 
 import (
+	"github.com/ewe-studios/sabuhp/sabu"
 	"log"
 	"time"
-
-	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/njson"
 )
@@ -12,7 +11,7 @@ import (
 type SubChannel struct {
 	T       string
 	G       string
-	Handler sabuhp.TransportResponse
+	Handler sabu.TransportResponse
 }
 
 func (s SubChannel) Topic() string {
@@ -39,24 +38,24 @@ func (l LoggerPub) Log(cb *njson.JSON) {
 }
 
 type TransportImpl struct {
-	ConnFunc      func() sabuhp.Conn
-	SendToOneFunc func(data *sabuhp.Message, timeout time.Duration) error
-	SendToAllFunc func(data *sabuhp.Message, timeout time.Duration) error
-	ListenFunc    func(topic string, handler sabuhp.TransportResponse) sabuhp.Channel
+	ConnFunc      func() sabu.Conn
+	SendToOneFunc func(data *sabu.Message, timeout time.Duration) error
+	SendToAllFunc func(data *sabu.Message, timeout time.Duration) error
+	ListenFunc    func(topic string, handler sabu.TransportResponse) sabu.Channel
 }
 
-func (t TransportImpl) Conn() sabuhp.Conn {
+func (t TransportImpl) Conn() sabu.Conn {
 	return t.ConnFunc()
 }
 
-func (t TransportImpl) Listen(topic string, handler sabuhp.TransportResponse) sabuhp.Channel {
+func (t TransportImpl) Listen(topic string, handler sabu.TransportResponse) sabu.Channel {
 	return t.ListenFunc(topic, handler)
 }
 
-func (t TransportImpl) SendToOne(data *sabuhp.Message, timeout time.Duration) error {
+func (t TransportImpl) SendToOne(data *sabu.Message, timeout time.Duration) error {
 	return t.SendToOneFunc(data, timeout)
 }
 
-func (t TransportImpl) SendToAll(data *sabuhp.Message, timeout time.Duration) error {
+func (t TransportImpl) SendToAll(data *sabu.Message, timeout time.Duration) error {
 	return t.SendToAllFunc(data, timeout)
 }

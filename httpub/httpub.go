@@ -3,6 +3,7 @@ package httpub
 import (
 	"bytes"
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"io"
 	"mime/multipart"
 	"net"
@@ -10,8 +11,6 @@ import (
 	"net/url"
 
 	"github.com/influx6/npkg/nunsafe"
-
-	"github.com/ewe-studios/sabuhp"
 )
 
 // Transport defines what we expect from a handler of requests.
@@ -22,12 +21,12 @@ type Transport interface {
 }
 
 type Handler interface {
-	Handle(req *Request, params sabuhp.Params) Response
+	Handle(req *Request, params sabu.Params) Response
 }
 
-type HandlerFunc func(req *Request, params sabuhp.Params) Response
+type HandlerFunc func(req *Request, params sabu.Params) Response
 
-func (h HandlerFunc) Handle(req *Request, params sabuhp.Params) Response {
+func (h HandlerFunc) Handle(req *Request, params sabu.Params) Response {
 	return h(req, params)
 }
 
@@ -44,9 +43,9 @@ type Request struct {
 	TLS              bool
 	Method           string
 	URL              *url.URL
-	Cookies          []sabuhp.Cookie
+	Cookies          []sabu.Cookie
 	Body             io.ReadCloser
-	Headers          sabuhp.Header
+	Headers          sabu.Header
 	Conn             net.Conn
 	Req              *http.Request
 }
@@ -68,10 +67,10 @@ type Response struct {
 	Code int
 
 	// Headers the headers explicitly set by the Handler.
-	Headers sabuhp.Header
+	Headers sabu.Header
 
 	// Cookies contains the cookies to be written as part of response.
-	Cookies []sabuhp.Cookie
+	Cookies []sabu.Cookie
 
 	// Body is the buffer to which the Handler's Write calls are sent.
 	// If nil, the Writes are silently discarded.

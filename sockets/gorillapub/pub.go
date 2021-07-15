@@ -2,7 +2,7 @@ package gorillapub
 
 import (
 	"context"
-	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"net/url"
 	"time"
 )
@@ -10,10 +10,10 @@ import (
 const retryExpansion = time.Millisecond * 100
 const EndpointDialTimeout = time.Second * 3
 
-func CreateClient(ctx context.Context, logger sabuhp.Logger, codec sabuhp.Codec, addr string, handler sabuhp.SocketMessageHandler) (*GorillaSocket, error) {
+func CreateClient(ctx context.Context, logger sabu.Logger, codec sabu.Codec, addr string, handler sabu.SocketMessageHandler) (*GorillaSocket, error) {
 	return GorillaClient(SocketConfig{
 		Info:                  &SocketInfo{
-			Headers: sabuhp.Header{},
+			Headers: sabu.Header{},
 			Query:   url.Values{},
 			Path:    addr,
 		},

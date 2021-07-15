@@ -2,13 +2,13 @@ package actions
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/influx6/npkg"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/injectors"
 
 	"github.com/influx6/npkg/nerror"
@@ -71,11 +71,11 @@ type Escalation struct {
 	// PendingMessages are the commands left to be processed when
 	// an escalation occurred. It's only set when it's a KillAndEscalate
 	// protocol.
-	PendingMessages chan *sabuhp.Message
+	PendingMessages chan *sabu.Message
 
 	// OffendingMessage is the message which caused the PanicProtocol
 	// Only has a value when it's a PanicProtocol.
-	OffendingMessage *sabuhp.Message
+	OffendingMessage *sabu.Message
 }
 
 type WorkerEscalationNotification func(escalation *Escalation, wk *WorkerGroup)
@@ -151,8 +151,8 @@ func (wc *WorkerConfig) ensure() {
 
 type WorkRequest struct {
 	Ctx       context.Context
-	Message   *sabuhp.Message
-	Transport sabuhp.Transport
+	Message   *sabu.Message
+	Transport sabu.Transport
 }
 
 // WorkerGroup embodies a small action based workgroup which at their default
@@ -314,7 +314,7 @@ func (w *WorkerGroup) WaitRestart() {
 	w.restartSignal.Wait()
 }
 
-func (w *WorkerGroup) HandleMessage(ctx context.Context, message sabuhp.Message, t sabuhp.Transport) error {
+func (w *WorkerGroup) HandleMessage(ctx context.Context, message sabu.Message, t sabu.Transport) error {
 	// attempt to handle message, if after 2 seconds,
 	// check if we still have capacity for workers
 	// if so increase it by adding a new one then send.
@@ -501,7 +501,7 @@ manageLoop:
 				break manageLoop
 			case StopAllAndEscalate:
 				var totalLeft = len(w.jobs)
-				var pending = make(chan *sabuhp.Message, totalLeft)
+				var pending = make(chan *sabu.Message, totalLeft)
 				for i := 0; i < totalLeft; i++ {
 					var current = <-w.jobs
 					pending <- current.Message

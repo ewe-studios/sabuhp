@@ -1,4 +1,4 @@
-package sabuhp
+package sabu
 
 import (
 	"time"

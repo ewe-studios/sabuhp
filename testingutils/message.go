@@ -1,36 +1,35 @@
 package testingutils
 
 import (
+	"github.com/ewe-studios/sabuhp/sabu"
 	"testing"
-
-	"github.com/ewe-studios/sabuhp"
 
 	"github.com/ewe-studios/websocket"
 )
 
-func Msg(topic sabuhp.Topic, message string, fromAddr string) sabuhp.Message {
-	return sabuhp.Message{
+func Msg(topic sabu.Topic, message string, fromAddr string) sabu.Message {
+	return sabu.Message{
 		Topic:       topic,
 		FromAddr:    fromAddr,
 		Bytes:       []byte(message),
-		ContentType: sabuhp.MessageContentType,
+		ContentType: sabu.MessageContentType,
 	}
 }
 
-func EncodedMsg(codec sabuhp.Codec, topic sabuhp.Topic, message string, fromAddr string) ([]byte, error) {
-	return codec.Encode(sabuhp.Message{
+func EncodedMsg(codec sabu.Codec, topic sabu.Topic, message string, fromAddr string) ([]byte, error) {
+	return codec.Encode(sabu.Message{
 		Topic:       topic,
 		FromAddr:    fromAddr,
 		Bytes:       []byte(message),
-		ContentType: sabuhp.MessageContentType,
+		ContentType: sabu.MessageContentType,
 	})
 }
 
-func DecodeMsg(codec sabuhp.Codec, data []byte) (sabuhp.Message, error) {
+func DecodeMsg(codec sabu.Codec, data []byte) (sabu.Message, error) {
 	return codec.Decode(data)
 }
 
-func ReceiveMsg(t *testing.T, ws *websocket.Conn, codec sabuhp.Codec) (sabuhp.Message, error) {
+func ReceiveMsg(t *testing.T, ws *websocket.Conn, codec sabu.Codec) (sabu.Message, error) {
 	t.Helper()
 
 	var m, err = GetWSMessage(t, ws)

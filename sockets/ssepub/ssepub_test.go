@@ -3,11 +3,11 @@ package ssepub
 import (
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"github.com/stretchr/testify/require"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/codecs"
 	"github.com/ewe-studios/sabuhp/testingutils"
 )
@@ -20,8 +20,8 @@ func TestNewSSEHub(t *testing.T) {
 	var sseServer = ManagedSSEServer(controlCtx, logger, nil, codec)
 	require.NotNil(t, sseServer)
 
-	var mx sabuhp.StreamFunc
-	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
+	var mx sabu.StreamFunc
+	mx.Listen = func(b sabu.Message, socket sabu.Socket) error {
 		fmt.Println("Received send request: ", b.Bytes, b.Topic)
 		var rm = b.ReplyTo()
 		rm.WithPayload([]byte("yay!"))
@@ -33,12 +33,12 @@ func TestNewSSEHub(t *testing.T) {
 
 	var httpServer = httptest.NewServer(sseServer)
 
-	var recvMsg = make(chan sabuhp.Message, 1)
+	var recvMsg = make(chan sabu.Message, 1)
 	var socket, err = NewSSEClient2(
 		controlCtx,
 		httpServer.URL,
 		"GET",
-		func(b sabuhp.Message, socket *SSEClient) error {
+		func(b sabu.Message, socket *SSEClient) error {
 			fmt.Println("Received response: ", b.Bytes, b.Topic)
 			require.NotEmpty(t, b)
 			require.NotNil(t, socket)
@@ -51,7 +51,7 @@ func TestNewSSEHub(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	var subscribeMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
+	var subscribeMessage = testingutils.Msg(sabu.T("hello"), "alex", "me")
 	socket.Send(subscribeMessage)
 
 	var okMessage = <-recvMsg

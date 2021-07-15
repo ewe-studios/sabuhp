@@ -2,6 +2,7 @@ package serviceServer
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"sync"
 
 	"github.com/influx6/npkg/njson"
@@ -12,7 +13,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/bus/redispub"
 )
 
@@ -66,17 +66,17 @@ type ServiceServer struct {
 	initer      sync.Once
 	Ctx         context.Context
 	CancelFunc  context.CancelFunc
-	Logger      sabuhp.Logger
+	Logger      sabu.Logger
 	ErrGroup    *errgroup.Group
-	BusRelay    *sabuhp.BusRelay
+	BusRelay    *sabu.BusRelay
 	Injector    *injectors.Injector
 	Registry    *actions.WorkerTemplateRegistry
 	Escalations actions.EscalationNotification
 	Workers     *actions.ActionHub
-	Bus         sabuhp.MessageBus
+	Bus         sabu.MessageBus
 }
 
-func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods ...Mod) *ServiceServer {
+func New(ctx context.Context, logger sabu.Logger, bus sabu.MessageBus, mods ...Mod) *ServiceServer {
 	var cs = new(ServiceServer)
 	cs.Bus = bus
 	cs.Logger = logger
@@ -87,7 +87,7 @@ func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods 
 
 	cs.Logger = logger
 	cs.Ctx, cs.CancelFunc = context.WithCancel(errCtx)
-	cs.BusRelay = sabuhp.NewBusRelay(cs.Ctx, cs.Logger, cs.Bus)
+	cs.BusRelay = sabu.NewBusRelay(cs.Ctx, cs.Logger, cs.Bus)
 
 	for _, mod := range mods {
 		mod(cs)

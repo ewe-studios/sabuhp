@@ -1,19 +1,19 @@
 package mixer
 
 import (
+	"github.com/ewe-studios/sabuhp/sabu"
 	"strings"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/utils"
 )
 
 type Handler interface {
-	Handle(message sabuhp.Message) (sabuhp.Message, error)
+	Handle(message sabu.Message) (sabu.Message, error)
 }
 
-type HandlerFunc func(message sabuhp.Message) (sabuhp.Message, error)
+type HandlerFunc func(message sabu.Message) (sabu.Message, error)
 
-func (h HandlerFunc) Handle(message sabuhp.Message) (sabuhp.Message, error) {
+func (h HandlerFunc) Handle(message sabu.Message) (sabu.Message, error) {
 	return h(message)
 }
 
@@ -51,11 +51,11 @@ func (m *Mux) Serve(route string, handler Handler) {
 //
 // Allow a mux to be used as a matcher and handler elsewhere.
 func (m *Mux) Match(target string) bool {
-	var handler = m.trie.Search(target, sabuhp.Params{})
+	var handler = m.trie.Search(target, sabu.Params{})
 	return handler != nil
 }
 
-func (m *Mux) ServeRoute(d sabuhp.Message) (sabuhp.Message, error) {
+func (m *Mux) ServeRoute(d sabu.Message) (sabu.Message, error) {
 	var reqPath = d.Path
 	if len(reqPath) > 1 && strings.HasSuffix(reqPath, "/") {
 		// remove trailing slash and client-permanent rule for redirection,

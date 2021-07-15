@@ -2,7 +2,7 @@ package utils
 
 import (
 	"context"
-	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -50,7 +50,7 @@ func CreateDefaultHttpClient() *http.Client {
 // DoRequest makes a request for giving parameters.
 func DoRequest(
 	ctx context.Context,
-	client sabuhp.HttpClient,
+	client sabu.HttpClient,
 	method string,
 	route string,
 	body io.Reader,

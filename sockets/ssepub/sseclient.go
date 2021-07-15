@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,8 +14,6 @@ import (
 	"github.com/influx6/npkg/njson"
 
 	"github.com/influx6/npkg/nxid"
-
-	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -27,19 +26,19 @@ var (
 	dataHeaderBytes = []byte("data:")
 )
 
-type MessageHandler func(message sabuhp.Message, socket *SSEClient) error
+type MessageHandler func(message sabu.Message, socket *SSEClient) error
 
 type SSEClient struct {
 	id         nxid.ID
 	maxRetries int
 	method     string
-	logger     sabuhp.Logger
-	retryFunc  sabuhp.RetryFunc
-	codec      sabuhp.Codec
+	logger     sabu.Logger
+	retryFunc  sabu.RetryFunc
+	codec      sabu.Codec
 	handler    MessageHandler // ensure to copy the bytes if your use will span multiple goroutines
 	ctx        context.Context
 	canceler   context.CancelFunc
-	client     sabuhp.HttpClient
+	client     sabu.HttpClient
 	request    *http.Request
 	response   *http.Response
 	lastId     nxid.ID
@@ -56,8 +55,8 @@ func NewSSEClient3(
 	route string,
 	method string,
 	handler MessageHandler,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
+	codec sabu.Codec,
+	logger sabu.Logger,
 ) (*SSEClient, error) {
 	return NewSSEClient(
 		ctx,
@@ -78,9 +77,9 @@ func NewSSEClient2(
 	route string,
 	method string,
 	handler MessageHandler,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
-	reqClient sabuhp.HttpClient,
+	codec sabu.Codec,
+	logger sabu.Logger,
+	reqClient sabu.HttpClient,
 ) (*SSEClient, error) {
 	return NewSSEClient(
 		ctx,
@@ -103,10 +102,10 @@ func NewSSEClient(
 	route string,
 	method string,
 	handler MessageHandler,
-	retryFn sabuhp.RetryFunc,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
-	reqClient sabuhp.HttpClient,
+	retryFn sabu.RetryFunc,
+	codec sabu.Codec,
+	logger sabu.Logger,
+	reqClient sabu.HttpClient,
 ) (*SSEClient, error) {
 	var header = http.Header{}
 	header.Set(ClientIdentificationHeader, id.String())
@@ -141,10 +140,10 @@ func NewSSEClientWithRequestResponse(
 	handler MessageHandler,
 	req *http.Request,
 	res *http.Response,
-	retryFn sabuhp.RetryFunc,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
-	reqClient sabuhp.HttpClient,
+	retryFn sabu.RetryFunc,
+	codec sabu.Codec,
+	logger sabu.Logger,
+	reqClient sabu.HttpClient,
 ) *SSEClient {
 	if req.Context() == nil {
 		panic("Request is required to have a context.Context attached")
@@ -177,7 +176,7 @@ func (sc *SSEClient) Wait() {
 	sc.waiter.Wait()
 }
 
-func (sc *SSEClient) Send(msgs ...sabuhp.Message) {
+func (sc *SSEClient) Send(msgs ...sabu.Message) {
 	for _, msg := range msgs {
 		if err := sc.SendAsMethod(sc.method, msg); err != nil {
 			if msg.Future != nil {
@@ -187,7 +186,7 @@ func (sc *SSEClient) Send(msgs ...sabuhp.Message) {
 	}
 }
 
-func (sc *SSEClient) SendAsMethod(method string, msg sabuhp.Message) error {
+func (sc *SSEClient) SendAsMethod(method string, msg sabu.Message) error {
 	var header = http.Header{}
 	for k, v := range msg.Headers {
 		header[k] = v
@@ -322,8 +321,8 @@ doLoop:
 				dataLine = bytes.TrimPrefix(dataLine, spaceBytes)
 
 				var messageErr error
-				var message sabuhp.Message
-				if contentType == sabuhp.MessageContentType {
+				var message sabu.Message
+				if contentType == sabu.MessageContentType {
 					message, messageErr = sc.codec.Decode(dataLine)
 					if messageErr != nil {
 						var wrappedErr = nerror.WrapOnly(messageErr)
@@ -341,14 +340,14 @@ doLoop:
 					var payload = make([]byte, len(dataLine))
 					_ = copy(payload, dataLine)
 
-					message = sabuhp.Message{
-						Topic:       sabuhp.T(sc.request.URL.Path),
+					message = sabu.Message{
+						Topic:       sabu.T(sc.request.URL.Path),
 						Id:          nxid.New(),
 						Path:        sc.request.URL.Path,
 						ContentType: contentType,
 						Query:       url.Values{},
 						Form:        url.Values{},
-						Headers:     sabuhp.Header{},
+						Headers:     sabu.Header{},
 						Cookies:     nil,
 						Bytes:       payload,
 						Metadata:    map[string]string{},

@@ -1,15 +1,15 @@
 package httpub
 
 import (
+	"github.com/ewe-studios/sabuhp/sabu"
 	"testing"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMuxRouter(t *testing.T) {
 	var mr = NewMux()
-	mr.UseHandleFunc("/reply", func(request *Request, params sabuhp.Params) Response {
+	mr.UseHandleFunc("/reply", func(request *Request, params sabu.Params) Response {
 		require.NotNil(t, request)
 		require.Equal(t, request.URL.Path, "/reply")
 		require.Equal(t, request.URL.Host, "localhost:8000")

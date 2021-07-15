@@ -2,15 +2,14 @@ package collectors
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"sync"
 	"time"
 
 	"github.com/influx6/npkg/nerror"
-
-	"github.com/ewe-studios/sabuhp"
 )
 
-type BatchHandler func(chan *sabuhp.Message)
+type BatchHandler func(chan *sabu.Message)
 
 type MessageCollection struct {
 	batchCount int
@@ -19,7 +18,7 @@ type MessageCollection struct {
 	handler    BatchHandler
 	ctx        context.Context
 	canceler   context.CancelFunc
-	batch      chan *sabuhp.Message
+	batch      chan *sabu.Message
 	batchTime  time.Duration
 	waiter     sync.WaitGroup
 }
@@ -32,7 +31,7 @@ func NewMessageCollection(ctx context.Context, maxCount int, batchWait time.Dura
 		batchCount: maxCount,
 		batchTime:  batchWait,
 		canceler:   newCanceler,
-		batch:      make(chan *sabuhp.Message, maxCount),
+		batch:      make(chan *sabu.Message, maxCount),
 	}
 	return mc
 }
@@ -48,7 +47,7 @@ func (mc *MessageCollection) Stop() {
 	})
 }
 
-func (mc *MessageCollection) TakeTill(msg *sabuhp.Message, timeout time.Duration) error {
+func (mc *MessageCollection) TakeTill(msg *sabu.Message, timeout time.Duration) error {
 	var tChan <-chan time.Time
 	if timeout > 0 {
 		tChan = time.After(timeout)
@@ -63,7 +62,7 @@ func (mc *MessageCollection) TakeTill(msg *sabuhp.Message, timeout time.Duration
 	}
 }
 
-func (mc *MessageCollection) Take(msg *sabuhp.Message) error {
+func (mc *MessageCollection) Take(msg *sabu.Message) error {
 	select {
 	case <-mc.ctx.Done():
 		return nerror.WrapOnly(mc.ctx.Err())
@@ -82,7 +81,7 @@ func (mc *MessageCollection) Start() {
 func (mc *MessageCollection) manage() {
 	defer mc.waiter.Done()
 
-	var nx = make(chan *sabuhp.Message, mc.batchCount)
+	var nx = make(chan *sabu.Message, mc.batchCount)
 	var ticker = time.NewTimer(mc.batchTime)
 	defer ticker.Stop()
 
@@ -93,13 +92,13 @@ func (mc *MessageCollection) manage() {
 		case <-ticker.C:
 			if len(nx) > 0 {
 				mc.handler(nx)
-				nx = make(chan *sabuhp.Message, mc.batchCount)
+				nx = make(chan *sabu.Message, mc.batchCount)
 			}
 		case item := <-mc.batch:
 			nx <- item
 			if len(nx) == mc.batchCount {
 				mc.handler(nx)
-				nx = make(chan *sabuhp.Message, mc.batchCount)
+				nx = make(chan *sabu.Message, mc.batchCount)
 				continue
 			}
 			ticker.Reset(mc.batchTime)

@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/influx6/npkg/nthen"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/codecs"
 	"github.com/stretchr/testify/require"
 
@@ -37,8 +37,8 @@ func TestGorillaClient(t *testing.T) {
 
 	hub.Start()
 
-	var mx sabuhp.StreamFunc
-	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
+	var mx sabu.StreamFunc
+	mx.Listen = func(b sabu.Message, socket sabu.Socket) error {
 		fmt.Println("Received send request: ", b.Bytes, b.Topic)
 		var rm = b.ReplyTo()
 		rm.WithPayload([]byte("yay!"))
@@ -59,12 +59,12 @@ func TestGorillaClient(t *testing.T) {
 	require.NotNil(t, httpServer)
 	require.NotEmpty(t, wsConnAddr)
 
-	var message = make(chan sabuhp.Message, 1)
+	var message = make(chan sabu.Message, 1)
 	var client, clientErr = GorillaClient(SocketConfig{
 		Info: &SocketInfo{
 			Path:    "yo",
 			Query:   url.Values{},
-			Headers: sabuhp.Header{},
+			Headers: sabu.Header{},
 		},
 		Ctx:      controlCtx,
 		Logger:   logger,
@@ -74,7 +74,7 @@ func TestGorillaClient(t *testing.T) {
 			return time.Duration(last) + (time.Millisecond * 100)
 		},
 		Endpoint: DefaultEndpoint(wsConnAddr, 2*time.Second),
-		Handler: func(b sabuhp.Message, from sabuhp.Socket) error {
+		Handler: func(b sabu.Message, from sabu.Socket) error {
 			require.NotEmpty(t, b)
 			require.NotNil(t, from)
 			message <- b
@@ -86,7 +86,7 @@ func TestGorillaClient(t *testing.T) {
 
 	client.Start()
 
-	var subscribeMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
+	var subscribeMessage = testingutils.Msg(sabu.T("hello"), "alex", "me")
 	subscribeMessage.Future = nthen.NewFuture()
 
 	client.Send(subscribeMessage)
@@ -115,8 +115,8 @@ func TestGorillaHub(t *testing.T) {
 
 	hub.Start()
 
-	var mx sabuhp.StreamFunc
-	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
+	var mx sabu.StreamFunc
+	mx.Listen = func(b sabu.Message, socket sabu.Socket) error {
 		fmt.Printf("Received send request: %+q -> %q\n", b.Bytes, b.Topic)
 		var rm = b.ReplyTo()
 		rm.WithPayload([]byte("yay!"))

@@ -2,19 +2,18 @@ package actions
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/ewe-studios/sabuhp/injectors"
 
-	"github.com/ewe-studios/sabuhp"
-
 	"github.com/stretchr/testify/require"
 )
 
 var testName = "test_action"
-var transport = sabuhp.Transport{Bus: &sabuhp.BusBuilder{}}
+var transport = sabu.Transport{Bus: &sabu.BusBuilder{}}
 var injector = injectors.NewInjector()
 
 func createWorkerConfig(ctx context.Context, action Action, buffer int, max int) WorkerConfig { //nolint:lll
@@ -55,8 +54,8 @@ func TestNewWorkGroup(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(context.Background(), sabuhp.Message{
-			Topic:    sabuhp.T("find_user"),
+		require.NoError(t, group.HandleMessage(context.Background(), sabu.Message{
+			Topic:    sabu.T("find_user"),
 			FromAddr: "component_1",
 			Bytes:    textPayload,
 			Metadata: nil,
@@ -104,8 +103,8 @@ func TestNewWorkGroup_ExpandingWorkforce(t *testing.T) {
 
 	var textPayload = []byte("Welcome to life")
 	for i := 0; i < 10; i++ {
-		require.NoError(t, group.HandleMessage(context.Background(), sabuhp.Message{
-			Topic:    sabuhp.T("find_user"),
+		require.NoError(t, group.HandleMessage(context.Background(), sabu.Message{
+			Topic:    sabu.T("find_user"),
 			FromAddr: "component_1",
 			Bytes:    textPayload,
 			Metadata: nil,
@@ -155,8 +154,8 @@ func TestNewWorkGroup_PanicRestartPolicy(t *testing.T) {
 	<-time.After(time.Second / 2)
 
 	var textPayload = []byte("Welcome to life")
-	var msg = sabuhp.Message{
-		Topic:    sabuhp.T("find_user"),
+	var msg = sabu.Message{
+		Topic:    sabu.T("find_user"),
 		FromAddr: "component_1",
 		Bytes:    textPayload,
 		Metadata: nil,
@@ -205,8 +204,8 @@ func TestNewWorkGroup_PanicStopAll(t *testing.T) {
 
 	<-time.After(time.Second / 2)
 	var textPayload = []byte("Welcome to life")
-	require.NoError(t, group.HandleMessage(context.Background(), sabuhp.Message{
-		Topic:    sabuhp.T("find_user"),
+	require.NoError(t, group.HandleMessage(context.Background(), sabu.Message{
+		Topic:    sabu.T("find_user"),
 		FromAddr: "component_1",
 		Bytes:    textPayload,
 		Metadata: nil,

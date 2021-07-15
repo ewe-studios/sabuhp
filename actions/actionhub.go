@@ -3,6 +3,7 @@ package actions
 import (
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"strings"
 	"sync"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/influx6/npkg"
 	"github.com/influx6/npkg/njson"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/injectors"
 
 	"github.com/influx6/npkg/nerror"
@@ -19,8 +19,8 @@ import (
 type Job struct {
 	To        string
 	DI        *injectors.Injector
-	Msg       *sabuhp.Message
-	Transport sabuhp.Transport
+	Msg       *sabu.Message
+	Transport sabu.Transport
 }
 
 type ActionFunc func(ctx context.Context, job Job)
@@ -200,9 +200,9 @@ type EscalationNotification func(escalation Escalation, hub *ActionHub)
 // the execution of functions deployed for processing of commands
 // asynchronously, each responding with another message if needed.
 type ActionHub struct {
-	Pubsub         sabuhp.MessageBus
-	Relay          *sabuhp.BusRelay
-	Logger         sabuhp.Logger
+	Pubsub         sabu.MessageBus
+	Relay          *sabu.BusRelay
+	Logger         sabu.Logger
 	Injector       *injectors.Injector
 	WorkRegistry   *WorkerTemplateRegistry
 	Context        context.Context
@@ -220,7 +220,7 @@ type ActionHub struct {
 	masterGroups      map[string]*MasterWorkerGroup
 
 	workerChannelMutex  sync.RWMutex
-	workerGroupChannels map[string]sabuhp.Channel
+	workerGroupChannels map[string]sabu.Channel
 	autoChannels        map[string]bool
 }
 
@@ -230,9 +230,9 @@ func NewActionHub(
 	escalationHandler EscalationNotification,
 	templates *WorkerTemplateRegistry,
 	injector *injectors.Injector,
-	pubsub sabuhp.MessageBus,
-	relay *sabuhp.BusRelay,
-	logger sabuhp.Logger,
+	pubsub sabu.MessageBus,
+	relay *sabu.BusRelay,
+	logger sabu.Logger,
 ) *ActionHub {
 	var cntx, cancelFn = context.WithCancel(ctx)
 	return &ActionHub{
@@ -344,10 +344,10 @@ func (ah *ActionHub) init() {
 		ah.masterGroups = map[string]*MasterWorkerGroup{}
 	}
 	if ah.workerGroupChannels == nil {
-		ah.workerGroupChannels = map[string]sabuhp.Channel{}
+		ah.workerGroupChannels = map[string]sabu.Channel{}
 	}
 	if ah.workerGroupChannels == nil {
-		ah.workerGroupChannels = map[string]sabuhp.Channel{}
+		ah.workerGroupChannels = map[string]sabu.Channel{}
 	}
 	if ah.actionChannel == nil {
 		ah.actionChannel = make(chan func())
@@ -413,8 +413,8 @@ func (ah *ActionHub) createAutoActionWorkers() {
 
 func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 	var logger = ah.Logger
-	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(
-		func(ctx context.Context, data sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabu.TransportResponseFunc(
+		func(ctx context.Context, data sabu.Message, tr sabu.Transport) sabu.MessageErr {
 
 			// get or create worker group for request topic
 			var workerGroup *MasterWorkerGroup
@@ -427,7 +427,7 @@ func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 			// if it's still nil then (should be impossible)
 			// but report message failure if allowed
 			if workerGroup == nil {
-				return sabuhp.WrapErr(nerror.New("worker group not found"), false)
+				return sabu.WrapErr(nerror.New("worker group not found"), false)
 			}
 
 			if err := workerGroup.Master.HandleMessage(ctx, data, tr); err != nil {
@@ -439,7 +439,7 @@ func (ah *ActionHub) createAutoActionWorker(req WorkerRequest) {
 					event.String("channel_action", req.ActionName)
 				}))
 
-				return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+				return sabu.WrapErr(nerror.WrapOnly(err), false)
 			}
 			return nil
 		}))
@@ -457,7 +457,7 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 
 	var logger = ah.Logger
 	var workerGroup = ah.createMasterGroup(req)
-	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabuhp.TransportResponseFunc(func(ctx context.Context, data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
+	var workerChannel = ah.Pubsub.Listen(req.PubSubTopic, req.PubSubGroup, sabu.TransportResponseFunc(func(ctx context.Context, data sabu.Message, sub sabu.Transport) sabu.MessageErr {
 		if err := workerGroup.Master.HandleMessage(ctx, data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.String("error", err.Error())
@@ -468,7 +468,7 @@ func (ah *ActionHub) createActionWorker(req WorkerRequest) {
 			if data.Future != nil {
 				data.Future.WithError(err)
 			}
-			return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+			return sabu.WrapErr(nerror.WrapOnly(err), false)
 		}
 
 		if data.Future != nil {
@@ -505,7 +505,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 	var slaveWorkerGroup = NewWorkGroup(workerConfig)
 	masterGroup.Slaves[slaveName] = slaveWorkerGroup
 
-	var workerChannel = ah.Pubsub.Listen(slaveName, req.GroupName, sabuhp.TransportResponseFunc(func(ctx context.Context, data sabuhp.Message, sub sabuhp.Transport) sabuhp.MessageErr {
+	var workerChannel = ah.Pubsub.Listen(slaveName, req.GroupName, sabu.TransportResponseFunc(func(ctx context.Context, data sabu.Message, sub sabu.Transport) sabu.MessageErr {
 		if err := slaveWorkerGroup.HandleMessage(ctx, data, sub); err != nil {
 			logger.Log(njson.JSONB(func(event npkg.Encoder) {
 				event.Int("_level", int(npkg.ERROR))
@@ -513,7 +513,7 @@ func (ah *ActionHub) createSlaveForMaster(req SlaveWorkerRequest, masterGroup *M
 				event.String("channel_topic", slaveName)
 				event.String("channel_action", req.ActionName)
 			}))
-			return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+			return sabu.WrapErr(nerror.WrapOnly(err), false)
 		}
 		return nil
 	}))
@@ -657,7 +657,7 @@ func (ah *ActionHub) hasWorkerChannel(channelTopic string) bool {
 	return hasWorkerGroup
 }
 
-func (ah *ActionHub) addWorkerChannel(channelTopic string, channel sabuhp.Channel) {
+func (ah *ActionHub) addWorkerChannel(channelTopic string, channel sabu.Channel) {
 	ah.workerChannelMutex.Lock()
 	{
 		ah.workerGroupChannels[channelTopic] = channel
@@ -666,7 +666,7 @@ func (ah *ActionHub) addWorkerChannel(channelTopic string, channel sabuhp.Channe
 }
 
 func (ah *ActionHub) closeWorkerChannel(channelTopic string) {
-	var channel sabuhp.Channel
+	var channel sabu.Channel
 	var hasChannel bool
 	var isAutoChannel bool
 
@@ -686,8 +686,8 @@ func (ah *ActionHub) closeWorkerChannel(channelTopic string) {
 	}
 }
 
-func (ah *ActionHub) getWorkerChannel(channelTopic string) sabuhp.Channel {
-	var channel sabuhp.Channel
+func (ah *ActionHub) getWorkerChannel(channelTopic string) sabu.Channel {
+	var channel sabu.Channel
 	ah.workerChannelMutex.RLock()
 	{
 		channel = ah.workerGroupChannels[channelTopic]
@@ -707,7 +707,7 @@ func (ah *ActionHub) isAutoChannel(channelTopic string) bool {
 }
 
 func (ah *ActionHub) endActionWorkers() {
-	var channels map[string]sabuhp.Channel
+	var channels map[string]sabu.Channel
 	var masterGroups map[string]*MasterWorkerGroup
 	// var workers map[string]*WorkerGroup
 
@@ -715,7 +715,7 @@ func (ah *ActionHub) endActionWorkers() {
 	ah.workerChannelMutex.Lock()
 	{
 		channels = ah.workerGroupChannels
-		ah.workerGroupChannels = map[string]sabuhp.Channel{}
+		ah.workerGroupChannels = map[string]sabu.Channel{}
 	}
 	ah.workerChannelMutex.Unlock()
 

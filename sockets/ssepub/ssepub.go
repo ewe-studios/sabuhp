@@ -3,6 +3,7 @@ package ssepub
 import (
 	"bytes"
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"io"
 	"net"
 	"net/http"
@@ -18,8 +19,6 @@ import (
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg/nerror"
-
-	"github.com/ewe-studios/sabuhp"
 )
 
 const (
@@ -32,13 +31,13 @@ const (
 
 var doubleLine = []byte("\n\n")
 
-var _ sabuhp.Handler = (*SSEServer)(nil)
+var _ sabu.Handler = (*SSEServer)(nil)
 
 func ManagedSSEServer(
 	ctx context.Context,
-	logger sabuhp.Logger,
-	optionalHeaders sabuhp.HeaderModifications,
-	codec sabuhp.Codec,
+	logger sabu.Logger,
+	optionalHeaders sabu.HeaderModifications,
+	codec sabu.Codec,
 ) *SSEServer {
 	return &SSEServer{
 		ctx:             ctx,
@@ -46,21 +45,21 @@ func ManagedSSEServer(
 		codec:           codec,
 		optionalHeaders: optionalHeaders,
 		sockets:         map[string]*SSESocket{},
-		streams:         sabuhp.NewSocketServers(),
+		streams:         sabu.NewSocketServers(),
 	}
 }
 
 type SSEServer struct {
-	logger          sabuhp.Logger
-	codec           sabuhp.Codec
-	optionalHeaders sabuhp.HeaderModifications
+	logger          sabu.Logger
+	codec           sabu.Codec
+	optionalHeaders sabu.HeaderModifications
 	ctx             context.Context
-	streams         *sabuhp.SocketServers
+	streams         *sabu.SocketServers
 	ssl             sync.RWMutex
 	sockets         map[string]*SSESocket
 }
 
-func (sse *SSEServer) Stream(server sabuhp.SocketService) {
+func (sse *SSEServer) Stream(server sabu.SocketService) {
 	sse.streams.Stream(server)
 }
 
@@ -76,11 +75,11 @@ func (sse *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var param = sabuhp.Params{}
+	var param = sabu.Params{}
 	sse.Handle(w, r, param)
 }
 
-func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Params) {
+func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabu.Params) {
 	var clientId = r.Header.Get(ClientIdentificationHeader)
 
 	var stack = njson.Log(sse.logger)
@@ -247,24 +246,24 @@ func (sse *SSEServer) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Pa
 	w.WriteHeader(http.StatusNoContent)
 }
 
-var _ sabuhp.Socket = (*SSESocket)(nil)
+var _ sabu.Socket = (*SSESocket)(nil)
 
 type SSESocket struct {
 	clientId   string
 	xid        nxid.ID
-	logger     sabuhp.Logger
+	logger     sabu.Logger
 	req        *http.Request
 	res        http.ResponseWriter
-	params     sabuhp.Params
-	codec      sabuhp.Codec
-	handlers   *sabuhp.Sock
+	params     sabu.Params
+	codec      sabu.Codec
+	handlers   *sabu.Sock
 	flusher    http.Flusher
-	sentMsgs   chan *sabuhp.Message
-	rcvMsgs    chan *sabuhp.Message
+	sentMsgs   chan *sabu.Message
+	rcvMsgs    chan *sabu.Message
 	ctx        context.Context
 	canceler   context.CancelFunc
 	waiter     sync.WaitGroup
-	headers    sabuhp.HeaderModifications
+	headers    sabu.HeaderModifications
 	remoteAddr net.Addr
 	localAddr  net.Addr
 
@@ -278,10 +277,10 @@ func NewSSESocket(
 	ctx context.Context,
 	r *http.Request,
 	w http.ResponseWriter,
-	params sabuhp.Params,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
-	optionalHeaders sabuhp.HeaderModifications,
+	params sabu.Params,
+	codec sabu.Codec,
+	logger sabu.Logger,
+	optionalHeaders sabu.HeaderModifications,
 ) *SSESocket {
 	var newCtx, newCanceler = context.WithCancel(ctx)
 	return &SSESocket{
@@ -303,7 +302,7 @@ func NewSSESocket(
 		xid:      nxid.New(),
 		canceler: newCanceler,
 		headers:  optionalHeaders,
-		handlers: sabuhp.NewSock(nil),
+		handlers: sabu.NewSock(nil),
 	}
 }
 
@@ -324,8 +323,8 @@ func (se *SSESocket) ID() nxid.ID {
 	return se.xid
 }
 
-func (se *SSESocket) Stat() sabuhp.SocketStat {
-	var stat sabuhp.SocketStat
+func (se *SSESocket) Stat() sabu.SocketStat {
+	var stat sabu.SocketStat
 	stat.Id = se.xid.String()
 	stat.Addr = se.localAddr
 	stat.RemoteAddr = se.remoteAddr
@@ -343,13 +342,13 @@ func (se *SSESocket) LocalAddr() net.Addr {
 	return se.localAddr
 }
 
-func (se *SSESocket) Send(messages ...sabuhp.Message) {
+func (se *SSESocket) Send(messages ...sabu.Message) {
 	for _, msg := range messages {
 		se.sendWrite(msg)
 	}
 }
 
-func (se *SSESocket) Listen(handler sabuhp.SocketMessageHandler) {
+func (se *SSESocket) Listen(handler sabu.SocketMessageHandler) {
 	se.handlers.Use(handler)
 }
 
@@ -488,7 +487,7 @@ func (se *SSESocket) Start() error {
 	return nil
 }
 
-func (se *SSESocket) sendWrite(msg sabuhp.Message) {
+func (se *SSESocket) sendWrite(msg sabu.Message) {
 	var encodedMessage, encodeErr = se.codec.Encode(msg)
 	if encodeErr != nil {
 		if msg.Future != nil {

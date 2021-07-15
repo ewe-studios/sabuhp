@@ -1,0 +1,33 @@
+namespace sabu;
+
+table KV {
+    name:string;
+    value:string;
+}
+
+table FlatMessage {
+  path:string;
+  ip:string;
+  local_ip:string;
+  expected_reply:byte;
+  reply_err:string;
+  suggested_status_code:short;
+  content_type:string;
+  form_name:string;
+  file_name:string;
+  headers:[KV];
+  cookies:[KV];
+  metadata:[KV];
+  form:string;
+  query:string;
+  within:float;
+  id:string;
+  end_part_id:string;
+  part_id:string;
+  subscribe_group:string;
+  subscribe_to:string;
+  topic:string;
+  reply_group:string;
+  from_addr:string;
+  bytes:[byte];
+}

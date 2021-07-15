@@ -3,6 +3,7 @@ package hsocks
 import (
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"github.com/influx6/npkg/nthen"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/ewe-studios/sabuhp/codecs"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/testingutils"
 )
 
@@ -42,10 +42,10 @@ func TestNewHub(t *testing.T) {
 	var logger = &testingutils.LoggerPub{}
 	var controlCtx, controlStopFunc = context.WithCancel(context.Background())
 
-	var mb sabuhp.BusBuilder
+	var mb sabu.BusBuilder
 
-	var mx sabuhp.StreamFunc
-	mx.Listen = func(b sabuhp.Message, socket sabuhp.Socket) error {
+	var mx sabu.StreamFunc
+	mx.Listen = func(b sabu.Message, socket sabu.Socket) error {
 		fmt.Println("Received send request: ", b.Bytes, b.Topic)
 		var rm = b.ReplyTo()
 		rm.WithPayload([]byte("yay!"))
@@ -57,8 +57,8 @@ func TestNewHub(t *testing.T) {
 	var servletServer = ManagedHttpServlet(
 		controlCtx,
 		logger,
-		sabuhp.NewHttpDecoderImpl(codec, logger, -1),
-		sabuhp.NewHttpEncoderImpl(codec, logger),
+		sabu.NewHttpDecoderImpl(codec, logger, -1),
+		sabu.NewHttpEncoderImpl(codec, logger),
 		nil,
 		&mb,
 	)
@@ -80,7 +80,7 @@ func TestNewHub(t *testing.T) {
 		httpServer.Client(),
 	)
 
-	var topicMessage = testingutils.Msg(sabuhp.T("hello"), "alex", "me")
+	var topicMessage = testingutils.Msg(sabu.T("hello"), "alex", "me")
 	topicMessage.Future = nthen.NewFuture()
 
 	socket.Send(topicMessage)
@@ -89,7 +89,7 @@ func TestNewHub(t *testing.T) {
 
 	require.NoError(t, topicMessage.Future.Err())
 
-	var response = topicMessage.Future.Value().(sabuhp.Message)
+	var response = topicMessage.Future.Value().(sabu.Message)
 	require.Equal(t, "yay!", string(response.Bytes))
 
 	controlStopFunc()

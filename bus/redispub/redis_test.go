@@ -3,11 +3,11 @@ package redispub
 import (
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/codecs"
 	redis "github.com/go-redis/redis/v8"
 
@@ -91,8 +91,8 @@ func TestRedis_Stream(t *testing.T) {
 	pb.Start()
 
 	var content = []byte("\"yes\"")
-	var whyMessage = sabuhp.NewMessage(sabuhp.T("why"), "me", content)
-	var whatMessage = sabuhp.NewMessage(sabuhp.T("what"), "me", content)
+	var whyMessage = sabu.NewMessage(sabu.T("why"), "me", content)
+	var whatMessage = sabu.NewMessage(sabu.T("what"), "me", content)
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
@@ -100,8 +100,8 @@ func TestRedis_Stream(t *testing.T) {
 	var channel = pb.Listen(
 		"what",
 		"*",
-		sabuhp.TransportResponseFunc(
-			func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+		sabu.TransportResponseFunc(
+			func(ctx context.Context, message sabu.Message, transport sabu.Transport) sabu.MessageErr {
 				delivered.Done()
 				transport.Bus.Send(whyMessage)
 				return nil
@@ -111,8 +111,8 @@ func TestRedis_Stream(t *testing.T) {
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why", "*", sabuhp.TransportResponseFunc(
-		func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+	var channel2 = pb.Listen("why", "*", sabu.TransportResponseFunc(
+		func(ctx context.Context, message sabu.Message, transport sabu.Transport) sabu.MessageErr {
 			delivered.Done()
 			return nil
 		}))
@@ -149,8 +149,8 @@ func TestRedis_PubSub(t *testing.T) {
 	pb.Start()
 
 	var content = []byte("\"yes\"")
-	var whyMessage = sabuhp.NewMessage(sabuhp.T("why"), "me", content)
-	var whatMessage = sabuhp.NewMessage(sabuhp.T("what"), "me", content)
+	var whyMessage = sabu.NewMessage(sabu.T("why"), "me", content)
+	var whatMessage = sabu.NewMessage(sabu.T("what"), "me", content)
 
 	var delivered sync.WaitGroup
 	delivered.Add(2)
@@ -158,8 +158,8 @@ func TestRedis_PubSub(t *testing.T) {
 	var channel = pb.Listen(
 		"what",
 		"*",
-		sabuhp.TransportResponseFunc(
-			func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+		sabu.TransportResponseFunc(
+			func(ctx context.Context, message sabu.Message, transport sabu.Transport) sabu.MessageErr {
 				delivered.Done()
 				transport.Bus.Send(whyMessage)
 				return nil
@@ -169,8 +169,8 @@ func TestRedis_PubSub(t *testing.T) {
 
 	defer channel.Close()
 
-	var channel2 = pb.Listen("why", "*", sabuhp.TransportResponseFunc(
-		func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+	var channel2 = pb.Listen("why", "*", sabu.TransportResponseFunc(
+		func(ctx context.Context, message sabu.Message, transport sabu.Transport) sabu.MessageErr {
 			delivered.Done()
 			return nil
 		}))
@@ -208,10 +208,10 @@ func TestRedis_PubSub_WithReply(t *testing.T) {
 
 	var content = []byte("\"yes\"")
 
-	var whyMessage = sabuhp.NewMessage(sabuhp.T("why"), "me", content)
+	var whyMessage = sabu.NewMessage(sabu.T("why"), "me", content)
 	whyMessage.ReplyGroup = "*"
 
-	var whyReplyMessage = sabuhp.NewMessage(whyMessage.Topic.ReplyTopic(), "me", content)
+	var whyReplyMessage = sabu.NewMessage(whyMessage.Topic.ReplyTopic(), "me", content)
 	whyReplyMessage.ReplyGroup = "*"
 	whyReplyMessage.Bytes = []byte("Yo!")
 
@@ -221,8 +221,8 @@ func TestRedis_PubSub_WithReply(t *testing.T) {
 	var channel = pb.Listen(
 		whyMessage.Topic.String(),
 		"*",
-		sabuhp.TransportResponseFunc(
-			func(ctx context.Context, message sabuhp.Message, transport sabuhp.Transport) sabuhp.MessageErr {
+		sabu.TransportResponseFunc(
+			func(ctx context.Context, message sabu.Message, transport sabu.Transport) sabu.MessageErr {
 				fmt.Printf("Received message: %+s\n", message)
 				delivered.Done()
 				transport.Bus.Send(whyReplyMessage)
@@ -238,7 +238,7 @@ func TestRedis_PubSub_WithReply(t *testing.T) {
 	require.NoError(t, replyErr)
 	require.NotNil(t, replyMsg)
 
-	var rm = replyMsg.(sabuhp.Message)
+	var rm = replyMsg.(sabu.Message)
 
 	require.Equal(t, "Yo!", string(rm.Bytes))
 

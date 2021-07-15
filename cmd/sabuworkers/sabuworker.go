@@ -1,8 +1,9 @@
-package main
+package sabuworkers
 
 import (
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"log"
 
 	"github.com/ewe-studios/sabuhp/actions"
@@ -11,24 +12,21 @@ import (
 
 	"github.com/influx6/npkg/ndaemon"
 
-	"github.com/ewe-studios/sabuhp"
-
 	"github.com/ewe-studios/sabuhp/bus/redispub"
-	"github.com/ewe-studios/sabuhp/servers/clientServer"
 	redis "github.com/go-redis/redis/v8"
 )
 
-func main() {
-	var ctx, canceler = context.WithCancel(context.Background())
+func Execute(rctx context.Context, codec sabu.Codec, redOps redis.Options) error {
+	var ctx, canceler = context.WithCancel(rctx)
 	ndaemon.WaiterForKillWithSignal(ndaemon.WaitForKillChan(), canceler)
 
-	var logger sabuhp.GoLogImpl
+	var logger sabu.GoLogImpl
 
 	var redisBus, busErr = redispub.Stream(redispub.Config{
 		Logger: logger,
 		Ctx:    ctx,
-		Redis:  redis.Options{},
-		Codec:  clientServer.DefaultCodec,
+		Redis:  redOps,
+		Codec:  codec,
 	})
 
 	if busErr != nil {
@@ -48,8 +46,7 @@ func main() {
 
 	fmt.Println("Started worker service")
 	if err := cs.ErrGroup.Wait(); err != nil {
-		log.Fatalf("service group finished with error: %+s", err.Error())
+		return err
 	}
-
-	fmt.Println("Closed worker service")
+	return nil
 }

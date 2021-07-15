@@ -2,18 +2,17 @@ package codecs
 
 import (
 	"bytes"
-
-	"github.com/ewe-studios/sabuhp"
+	"github.com/ewe-studios/sabuhp/sabu"
 
 	"github.com/influx6/npkg/nerror"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-var _ sabuhp.Codec = (*MessageMsgPackCodec)(nil)
+var _ sabu.Codec = (*MessageMsgPackCodec)(nil)
 
 type MessageMsgPackCodec struct{}
 
-func (j *MessageMsgPackCodec) Encode(message sabuhp.Message) ([]byte, error) {
+func (j *MessageMsgPackCodec) Encode(message sabu.Message) ([]byte, error) {
 	message.Parts = nil
 	var buf bytes.Buffer
 	if encodedErr := msgpack.NewEncoder(&buf).Encode(message); encodedErr != nil {
@@ -22,8 +21,8 @@ func (j *MessageMsgPackCodec) Encode(message sabuhp.Message) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (j *MessageMsgPackCodec) Decode(b []byte) (sabuhp.Message, error) {
-	var message sabuhp.Message
+func (j *MessageMsgPackCodec) Decode(b []byte) (sabu.Message, error) {
+	var message sabu.Message
 	if jsonErr := msgpack.NewDecoder(bytes.NewBuffer(b)).Decode(&message); jsonErr != nil {
 		return message, nerror.WrapOnly(jsonErr)
 	}

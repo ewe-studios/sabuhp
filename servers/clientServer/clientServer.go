@@ -2,7 +2,9 @@ package clientServer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"net/http"
 	"sync"
 	"time"
@@ -25,7 +27,6 @@ import (
 	"github.com/ewe-studios/sabuhp/httpub/serverpub"
 	"github.com/ewe-studios/sabuhp/sockets/gorillapub"
 
-	"github.com/ewe-studios/sabuhp"
 	"github.com/ewe-studios/sabuhp/radar"
 )
 
@@ -34,8 +35,10 @@ const (
 )
 
 var (
-	DefaultCodec = &codecs.MessageMsgPackCodec{}
-	upgrader     = &websocket.Upgrader{
+	DefaultMsgPackCodec = &codecs.MessageMsgPackCodec{}
+	DefaultJSONCodec    = &codecs.MessageJsonCodec{}
+	DefaultGobCodec     = &codecs.MessageGobCodec{}
+	upgrader            = &websocket.Upgrader{
 		HandshakeTimeout:  time.Second * 5,
 		ReadBufferSize:    gorillapub.DefaultMaxMessageSize,
 		WriteBufferSize:   gorillapub.DefaultMaxMessageSize,
@@ -81,7 +84,7 @@ func WithWebsocketConfigCreator(this gorillapub.ConfigCreator) Mod {
 	}
 }
 
-func WithHeaderMod(this sabuhp.HeaderModifications) Mod {
+func WithHeaderMod(this sabu.HeaderModifications) Mod {
 	return func(cs *ClientServer) {
 		cs.HeaderMod = this
 	}
@@ -93,13 +96,25 @@ func WithWebsocketHeader(this gorillapub.ResponseHeadersFromRequest) Mod {
 	}
 }
 
-func WithHttpDecoder(this sabuhp.HttpDecoder) Mod {
+func WithCodec(this sabu.Codec) Mod {
+	return func(cs *ClientServer) {
+		cs.DefaultCodec = this
+	}
+}
+
+func WithHttpDecoder(this sabu.HttpDecoder) Mod {
 	return func(cs *ClientServer) {
 		cs.Decoder = this
 	}
 }
 
-func WithHttpEncoder(this sabuhp.HttpEncoder) Mod {
+func WithTLS(this *tls.Config) Mod {
+	return func(cs *ClientServer) {
+		cs.TLSConfig = this
+	}
+}
+
+func WithHttpEncoder(this sabu.HttpEncoder) Mod {
 	return func(cs *ClientServer) {
 		cs.Encoder = this
 	}
@@ -108,7 +123,7 @@ func WithHttpEncoder(this sabuhp.HttpEncoder) Mod {
 func WithMux(config radar.MuxConfig) Mod {
 	return func(cs *ClientServer) {
 		if config.NotFound == nil {
-			config.NotFound = sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
+			config.NotFound = sabu.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabu.Params) {
 				http.NotFound(writer, request)
 			})
 		}
@@ -126,26 +141,28 @@ type ClientServer struct {
 	Addr            string
 	initer          sync.Once
 	Mux             *radar.Mux
+	TLSConfig       *tls.Config
 	Ctx             context.Context
 	CancelFunc      context.CancelFunc
-	Logger          sabuhp.Logger
+	Logger          sabu.Logger
 	ErrGroup        *errgroup.Group
-	BusRelay        *sabuhp.BusRelay
+	BusRelay        *sabu.BusRelay
 	SSEServer       *ssepub.SSEServer
 	HttpServer      *serverpub.Server
-	Bus             sabuhp.MessageBus
-	Decoder         sabuhp.HttpDecoder
-	Encoder         sabuhp.HttpEncoder
+	Bus             sabu.MessageBus
+	DefaultCodec    sabu.Codec
+	Decoder         sabu.HttpDecoder
+	Encoder         sabu.HttpEncoder
 	HttpServlet     *hsocks.HttpServlet
 	Upgrader        *websocket.Upgrader
-	HeaderMod       sabuhp.HeaderModifications
+	HeaderMod       sabu.HeaderModifications
 	WebsocketConf   gorillapub.ConfigCreator
 	WebsocketHeader gorillapub.ResponseHeadersFromRequest
 	WebsocketServer *gorillapub.GorillaHub
-	StreamBinder    *sabuhp.StreamBusRelay
+	StreamBinder    *sabu.StreamBusRelay
 }
 
-func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods ...Mod) *ClientServer {
+func New(ctx context.Context, logger sabu.Logger, bus sabu.MessageBus, mods ...Mod) *ClientServer {
 	var cs = new(ClientServer)
 	cs.Bus = bus
 
@@ -154,8 +171,8 @@ func New(ctx context.Context, logger sabuhp.Logger, bus sabuhp.MessageBus, mods 
 
 	cs.Logger = logger
 	cs.Ctx, cs.CancelFunc = context.WithCancel(errCtx)
-	cs.BusRelay = sabuhp.NewBusRelay(cs.Ctx, cs.Logger, cs.Bus)
-	cs.StreamBinder = sabuhp.NewStreamBusRelay(cs.Logger, cs.Bus, cs.BusRelay)
+	cs.BusRelay = sabu.NewBusRelay(cs.Ctx, cs.Logger, cs.Bus)
+	cs.StreamBinder = sabu.NewStreamBusRelay(cs.Logger, cs.Bus, cs.BusRelay)
 
 	for _, mod := range mods {
 		mod(cs)
@@ -205,7 +222,7 @@ func (c *ClientServer) Wait() error {
 	return c.ErrGroup.Wait()
 }
 
-func (c *ClientServer) notFoundHandler(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
+func (c *ClientServer) notFoundHandler(writer http.ResponseWriter, request *http.Request, params sabu.Params) {
 	var logStack = njson.Log(c.Logger)
 
 	logStack.New().
@@ -232,12 +249,20 @@ func (c *ClientServer) notFoundHandler(writer http.ResponseWriter, request *http
 }
 
 func (c *ClientServer) initializeComponents() {
+	if c.Encoder == nil && c.DefaultCodec == nil {
+		panic("Either provide the Encoder or provide the ClientServer.DefaultCodec")
+	}
+
+	if c.Decoder == nil && c.DefaultCodec == nil {
+		panic("Either provide the Decoder or provide the ClientServer.DefaultCodec")
+	}
+
 	if c.Encoder == nil {
-		c.Encoder = sabuhp.NewHttpEncoderImpl(DefaultCodec, c.Logger)
+		c.Encoder = sabu.NewHttpEncoderImpl(c.DefaultCodec, c.Logger)
 	}
 
 	if c.Decoder == nil {
-		c.Decoder = sabuhp.NewHttpDecoderImpl(DefaultCodec, c.Logger, DefaultMaxSize)
+		c.Decoder = sabu.NewHttpDecoderImpl(c.DefaultCodec, c.Logger, DefaultMaxSize)
 	}
 
 	if c.Mux == nil {
@@ -250,7 +275,7 @@ func (c *ClientServer) initializeComponents() {
 			Decoder:  c.Decoder,
 			Encoder:  c.Encoder,
 			Headers:  nil,
-			NotFound: sabuhp.HandlerFunc(c.notFoundHandler),
+			NotFound: sabu.HandlerFunc(c.notFoundHandler),
 		})
 	}
 
@@ -259,15 +284,15 @@ func (c *ClientServer) initializeComponents() {
 	}
 
 	if c.SSEServer == nil {
-		c.SSEServer = ssepub.ManagedSSEServer(c.Ctx, c.Logger, c.HeaderMod, DefaultCodec)
+		c.SSEServer = ssepub.ManagedSSEServer(c.Ctx, c.Logger, c.HeaderMod, c.DefaultCodec)
 	}
 
 	if c.WebsocketServer == nil {
-		c.WebsocketServer = gorillapub.ManagedGorillaHub(c.Ctx, c.Logger, c.WebsocketConf, DefaultCodec)
+		c.WebsocketServer = gorillapub.ManagedGorillaHub(c.Ctx, c.Logger, c.WebsocketConf, c.DefaultCodec)
 	}
 
 	if c.HttpServer == nil {
-		c.HttpServer = serverpub.NewServer(c.Mux, time.Minute)
+		c.HttpServer = serverpub.NewServerWithTLS(true, c.TLSConfig, c.Mux, time.Minute)
 	}
 
 	c.HttpServer.ReadyFunc = c.readyServer
@@ -280,7 +305,7 @@ func (c *ClientServer) initializeComponents() {
 	c.HttpServlet.Stream(c.StreamBinder)
 	c.WebsocketServer.Stream(c.StreamBinder)
 
-	c.Mux.Http("/_routes", sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
+	c.Mux.Http("/_routes", sabu.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabu.Params) {
 		writer.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(writer).Encode(c.Mux.Routes()); err != nil {
 			var logMessage = njson.MJSON("failed to render response")
@@ -291,7 +316,7 @@ func (c *ClientServer) initializeComponents() {
 		}
 	}), "GET", "HEAD")
 
-	c.Mux.Http("/health", sabuhp.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabuhp.Params) {
+	c.Mux.Http("/health", sabu.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabu.Params) {
 		if err := c.HttpServer.Health.Ping(); err != nil {
 			writer.WriteHeader(http.StatusBadGateway)
 			return
@@ -299,15 +324,29 @@ func (c *ClientServer) initializeComponents() {
 		writer.WriteHeader(http.StatusOK)
 	}), "GET", "HEAD")
 
+	c.Mux.Http("/api/event/", sabu.HandlerFunc(func(writer http.ResponseWriter, request *http.Request, params sabu.Params) {
+		var contentType = request.Header.Get("Content-Type")
+		switch contentType {
+		case "application/flatbuffer", "application/fbp":
+			// do something
+		case "application/msgpck", "application/messagepack", "application/mesgpck":
+			// do something
+		case "application/json":
+			// do something
+		case "www/form-data":
+			// do something
+		}
+	}), "GET", "HEAD")
+
 	// setup stream routes for http
-	c.Mux.Http("/streams/http", c.HttpServlet)
+	c.Mux.Http("/api/streams/http", c.HttpServlet)
 
 	// setup stream routes for sse
-	c.Mux.Http("/streams/sse", c.SSEServer, "GET", "HEAD")
+	c.Mux.Http("/api/streams/sse", c.SSEServer, "GET", "HEAD")
 
 	// setup routes for websocket
 	var websocketHandler = gorillapub.UpgraderHandler(c.Logger, c.WebsocketServer, c.Upgrader, c.WebsocketHeader)
-	c.Mux.Http("/streams/ws", websocketHandler, "GET", "HEAD")
+	c.Mux.Http("/api/streams/ws", websocketHandler, "GET", "HEAD")
 }
 
 func (c *ClientServer) readyServer() {

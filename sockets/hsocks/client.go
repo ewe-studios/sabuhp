@@ -3,6 +3,7 @@ package hsocks
 import (
 	"bytes"
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"io"
 	"net/http"
 	"strings"
@@ -11,8 +12,6 @@ import (
 	"github.com/influx6/npkg/njson"
 
 	"github.com/influx6/npkg/nxid"
-
-	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 
@@ -24,11 +23,11 @@ type SendClient struct {
 	id            nxid.ID
 	Route         string
 	RequestMethod string
-	codec         sabuhp.Codec
-	logger        sabuhp.Logger
-	retryFunc     sabuhp.RetryFunc
+	codec         sabu.Codec
+	logger        sabu.Logger
+	retryFunc     sabu.RetryFunc
 	ctx           context.Context
-	client        sabuhp.HttpClient
+	client        sabu.HttpClient
 	lastId        nxid.ID
 	retry         time.Duration
 }
@@ -41,9 +40,9 @@ func CreateClient(
 	ctx context.Context,
 	addr string,
 	method string,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
-	client sabuhp.HttpClient,
+	codec sabu.Codec,
+	logger sabu.Logger,
+	client sabu.HttpClient,
 ) *SendClient {
 	return NewClient(ctx, nxid.New(), addr, 5, method, codec, linearBackOff, logger, client)
 }
@@ -52,8 +51,8 @@ func CreateClient2(
 	ctx context.Context,
 	addr string,
 	method string,
-	codec sabuhp.Codec,
-	logger sabuhp.Logger,
+	codec sabu.Codec,
+	logger sabu.Logger,
 ) *SendClient {
 	return NewClient(ctx, nxid.New(), addr, 5, method, codec, linearBackOff, logger, utils.CreateDefaultHttpClient())
 }
@@ -64,10 +63,10 @@ func NewClient(
 	route string,
 	maxRetries int,
 	method string,
-	codec sabuhp.Codec,
-	retryFn sabuhp.RetryFunc,
-	logger sabuhp.Logger,
-	reqClient sabuhp.HttpClient,
+	codec sabu.Codec,
+	retryFn sabu.RetryFunc,
+	logger sabu.Logger,
+	reqClient sabu.HttpClient,
 ) *SendClient {
 	var client = &SendClient{
 		id:            id,
@@ -106,7 +105,7 @@ func (sc *SendClient) Start() {
 	// do nothing
 }
 
-func (sc *SendClient) Send(msgs ...sabuhp.Message) {
+func (sc *SendClient) Send(msgs ...sabu.Message) {
 	for _, msg := range msgs {
 		if err := sc.SendMessageAsMethod(sc.RequestMethod, msg); err != nil {
 			if msg.Future != nil {
@@ -116,16 +115,16 @@ func (sc *SendClient) Send(msgs ...sabuhp.Message) {
 	}
 }
 
-func (sc *SendClient) SendMessageAsMethod(method string, msg sabuhp.Message) error {
+func (sc *SendClient) SendMessageAsMethod(method string, msg sabu.Message) error {
 	var ft = msg.Future
 
 	var timeout = msg.Within
-	var header = sabuhp.Header{}
+	var header = sabu.Header{}
 	for k, v := range msg.Headers {
 		header[k] = v
 	}
 	header.Set(ClientIdentificationHeader, sc.id.String())
-	header.Set("Content-Type", sabuhp.MessageContentType)
+	header.Set("Content-Type", sabu.MessageContentType)
 
 	var ctx = sc.ctx
 	var canceler context.CancelFunc
@@ -196,16 +195,16 @@ func (sc *SendClient) SendMessageAsMethod(method string, msg sabuhp.Message) err
 
 	var contentType = response.Header.Get("Content-Type")
 	var contentTypeLower = strings.ToLower(contentType)
-	if !strings.Contains(contentTypeLower, sabuhp.MessageContentType) {
-		ft.WithValue(sabuhp.Message{
-			Topic:       sabuhp.T(req.URL.Path),
+	if !strings.Contains(contentTypeLower, sabu.MessageContentType) {
+		ft.WithValue(sabu.Message{
+			Topic:       sabu.T(req.URL.Path),
 			Id:          nxid.New(),
 			ContentType: contentType,
 			Path:        req.URL.Path,
 			Query:       req.URL.Query(),
 			Form:        req.Form,
-			Headers:     sabuhp.Header(response.Header.Clone()),
-			Cookies:     sabuhp.ReadCookies(sabuhp.Header(response.Header), ""),
+			Headers:     sabu.Header(response.Header.Clone()),
+			Cookies:     sabu.ReadCookies(sabu.Header(response.Header), ""),
 			Bytes:       responseBody.Bytes(),
 			Metadata:    map[string]string{},
 			Params:      map[string]string{},
@@ -226,7 +225,7 @@ func (sc *SendClient) SendMessageAsMethod(method string, msg sabuhp.Message) err
 	return nil
 }
 
-func (sc *SendClient) try(method string, header sabuhp.Header, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {
+func (sc *SendClient) try(method string, header sabu.Header, body io.Reader, ctx context.Context) (*http.Request, *http.Response, error) {
 	header.Set(ClientIdentificationHeader, sc.id.String())
 
 	var retryCount int

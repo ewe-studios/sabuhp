@@ -3,6 +3,7 @@ package radar
 import (
 	"context"
 	"fmt"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"net/http"
 	"strings"
 
@@ -12,20 +13,18 @@ import (
 
 	"github.com/ewe-studios/sabuhp/sockets/hsocks"
 	"github.com/ewe-studios/sabuhp/utils"
-
-	"github.com/ewe-studios/sabuhp"
 )
 
 type MuxConfig struct {
 	RootPath string
-	Bus      sabuhp.MessageBus
-	Logger   sabuhp.Logger
-	NotFound sabuhp.Handler
-	Relay    *sabuhp.BusRelay
+	Bus      sabu.MessageBus
+	Logger   sabu.Logger
+	NotFound sabu.Handler
+	Relay    *sabu.BusRelay
 	Ctx      context.Context
-	Decoder  sabuhp.HttpDecoder
-	Encoder  sabuhp.HttpEncoder
-	Headers  sabuhp.HeaderModifications
+	Decoder  sabu.HttpDecoder
+	Encoder  sabu.HttpEncoder
+	Headers  sabu.HeaderModifications
 }
 
 func (mc *MuxConfig) validate() {
@@ -54,12 +53,12 @@ type Mux struct {
 	config       MuxConfig
 	rootPath     string
 	trie         *Trie
-	logger       sabuhp.Logger
-	NotFound     sabuhp.Handler
-	subRoutes    []sabuhp.MessageRouter
-	relay        *sabuhp.BusRelay
-	pre          sabuhp.Wrappers
-	preHttp      sabuhp.HttpWrappers
+	logger       sabu.Logger
+	NotFound     sabu.Handler
+	subRoutes    []sabu.MessageRouter
+	relay        *sabu.BusRelay
+	pre          sabu.Wrappers
+	preHttp      sabu.HttpWrappers
 	httpToEvents *hsocks.HttpServlet
 	routes       map[string]bool
 }
@@ -93,13 +92,13 @@ func (m *Mux) Routes() []string {
 	return routes
 }
 
-func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
+func (m *Mux) Http(route string, handler sabu.Handler, methods ...string) {
 	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+			func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
@@ -118,21 +117,21 @@ func (m *Mux) Http(route string, handler sabuhp.Handler, methods ...string) {
 // The event name will be the route of the http request path.
 //
 // Understand that closing the channel does not close the http endpoint.
-func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp.TransportResponse, methods ...string) {
+func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabu.TransportResponse, methods ...string) {
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+			func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
-					return muxHandler.Handle(request.Context(), b, sabuhp.Transport{
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabu.Message, from sabu.Socket) error {
+					return muxHandler.Handle(request.Context(), b, sabu.Transport{
 						Bus:    m.config.Bus,
 						Socket: from,
 					})
@@ -149,21 +148,21 @@ func (m *Mux) HttpServiceWithName(eventName string, route string, handler sabuhp
 // The event name will be the route of the http request path.
 //
 // Understand that closing the channel does not close the http endpoint.
-func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, methods ...string) {
+func (m *Mux) HttpService(route string, handler sabu.TransportResponse, methods ...string) {
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+			func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabuhp.Message, from sabuhp.Socket) error {
-					return muxHandler.Handle(request.Context(), b, sabuhp.Transport{
+				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabu.Message, from sabu.Socket) error {
+					return muxHandler.Handle(request.Context(), b, sabu.Transport{
 						Bus:    m.config.Bus,
 						Socket: from,
 					})
@@ -176,7 +175,7 @@ func (m *Mux) HttpService(route string, handler sabuhp.TransportResponse, method
 // Event registers handlers for a giving event returning it's channel.
 //
 // Understand that closing the channel does not close the http endpoint.
-func (m *Mux) Event(eventName string, grp string, handler sabuhp.TransportResponse) sabuhp.Channel {
+func (m *Mux) Event(eventName string, grp string, handler sabu.TransportResponse) sabu.Channel {
 	var muxHandler = m.pre.For(handler)
 	var gp = m.relay.Group(eventName, grp)
 	return gp.Listen(muxHandler)
@@ -186,21 +185,21 @@ func (m *Mux) Event(eventName string, grp string, handler sabuhp.TransportRespon
 // events channel.
 //
 // Understand that closing the channel does not close the http endpoint.
-func (m *Mux) Service(eventName string, grp string, route string, handler sabuhp.TransportResponse, methods ...string) sabuhp.Channel {
+func (m *Mux) Service(eventName string, grp string, route string, handler sabu.TransportResponse, methods ...string) sabu.Channel {
 	var muxHandler = m.pre.For(handler)
 	var searchRoute = utils.ReduceMultipleSlashToOne(m.rootPath + route)
 	methods = toLower(methods)
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+			func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
-					return muxHandler.Handle(request.Context(), b, sabuhp.Transport{
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabu.Message, from sabu.Socket) error {
+					return muxHandler.Handle(request.Context(), b, sabu.Transport{
 						Bus:    m.config.Bus,
 						Socket: from,
 					})
@@ -223,13 +222,13 @@ func (m *Mux) RedirectAsPath(route string, methods ...string) {
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+			func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabuhp.Message, from sabuhp.Socket) error {
+				m.httpToEvents.HandleMessage(writer, request, p, request.URL.Path, func(b sabu.Message, from sabu.Socket) error {
 					m.config.Bus.Send(b)
 					return nil
 				})
@@ -248,13 +247,13 @@ func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
 	m.routes[searchRoute] = true
 	m.trie.Insert(searchRoute, WithHandler(
 		m.preHttp.ForFunc(
-			func(writer http.ResponseWriter, request *http.Request, p sabuhp.Params) {
+			func(writer http.ResponseWriter, request *http.Request, p sabu.Params) {
 				if len(methods) > 0 && indexOfList(methods, strings.ToLower(request.Method)) == -1 {
 					writer.WriteHeader(http.StatusBadRequest)
 					return
 				}
 
-				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabuhp.Message, from sabuhp.Socket) error {
+				m.httpToEvents.HandleMessage(writer, request, p, eventName, func(b sabu.Message, from sabu.Socket) error {
 					m.config.Bus.Send(b)
 					return nil
 				})
@@ -266,30 +265,30 @@ func (m *Mux) RedirectTo(eventName string, route string, methods ...string) {
 // Match implements the Matcher interface.
 //
 // Allow a mux to be used as a matcher and handler elsewhere.
-func (m *Mux) Match(msg *sabuhp.Message) bool {
-	var handler = m.trie.Search(msg.Topic.String(), sabuhp.Params{})
+func (m *Mux) Match(msg *sabu.Message) bool {
+	var handler = m.trie.Search(msg.Topic.String(), sabu.Params{})
 	return handler != nil
 }
 
-func (m *Mux) ServeWithMatchers(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+func (m *Mux) ServeWithMatchers(ctx context.Context, msg sabu.Message, tr sabu.Transport) sabu.MessageErr {
 	for _, h := range m.subRoutes {
 		if h.Match(&msg) {
 			return h.Handle(ctx, msg, tr)
 		}
 	}
 
-	return sabuhp.WrapErr(nerror.New("no handler found"), false)
+	return sabu.WrapErr(nerror.New("no handler found"), false)
 }
 
 type matcherHandler struct {
-	sabuhp.Matcher
-	sabuhp.TransportResponse
+	sabu.Matcher
+	sabu.TransportResponse
 }
 
 // AddMatchedRoute adds a priority route which takes priority to all other routes
 // local to the multiplexer. If a message is matched by said router then that
 // Handler will handle said message accordingly.
-func (m *Mux) AddMatchedRoute(matcher sabuhp.Matcher, response sabuhp.TransportResponse) {
+func (m *Mux) AddMatchedRoute(matcher sabu.Matcher, response sabu.TransportResponse) {
 	m.subRoutes = append(m.subRoutes, matcherHandler{
 		Matcher:           matcher,
 		TransportResponse: response,
@@ -298,18 +297,18 @@ func (m *Mux) AddMatchedRoute(matcher sabuhp.Matcher, response sabuhp.TransportR
 
 // AddPreHttp adds a http wrapper which will act as a middleware
 // wrapper for all route's response before the target handler.
-func (m *Mux) AddPreHttp(response sabuhp.HttpWrapper) {
+func (m *Mux) AddPreHttp(response sabu.HttpWrapper) {
 	m.preHttp = append(m.preHttp, response)
 }
 
 // AddPre adds a response.Handler which will act as a middleware
 // wrapper for all route's response before the target handler.
-func (m *Mux) AddPre(response sabuhp.Wrapper) {
+func (m *Mux) AddPre(response sabu.Wrapper) {
 	m.pre = append(m.pre, response)
 }
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var params = sabuhp.Params{}
+	var params = sabu.Params{}
 
 	var stack = njson.Log(m.logger)
 	stack.New().

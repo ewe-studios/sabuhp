@@ -1,7 +1,8 @@
-package sabuhp
+package sabu
 
 import (
 	"fmt"
+	"github.com/influx6/npkg/nerror"
 	"io"
 	"net/url"
 	"strings"
@@ -67,6 +68,22 @@ func NewTopic(t string, r string) Topic {
 		T: t,
 		R: r,
 	}
+}
+
+func (t *Topic) FromString(tm string) error {
+	if strings.Contains(tm, "reply") {
+		var tml = strings.Replace(tm, "-reply-", ".", 1)
+		var parts = strings.Split(tml, ".")
+		if len(parts) != 2 {
+			return nerror.New("invalid topic string %s", tml)
+		}
+		t.T = parts[0]
+		t.R = parts[1]
+		return nil
+	}
+
+	t.T = tm
+	return nil
 }
 
 func (t Topic) String() string {

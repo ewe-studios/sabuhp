@@ -1,10 +1,9 @@
 package radar
 
 import (
+	"github.com/ewe-studios/sabuhp/sabu"
 	"sort"
 	"strings"
-
-	"github.com/ewe-studios/sabuhp"
 )
 
 // Node is the trie's node which path patterns with their data like an HTTP handler are saved to.
@@ -25,7 +24,7 @@ type Node struct {
 	staticKey string
 
 	// insert main data relative to http and a tag for things like route names.
-	Handler sabuhp.Handler
+	Handler sabu.Handler
 	Tag     string
 
 	// other insert data.
@@ -173,7 +172,7 @@ func NewTrie() *Trie {
 type InsertOption func(*Node)
 
 // WithHandler sets the node's `Handler` field (useful for HTTP).
-func WithHandler(handler sabuhp.Handler) InsertOption {
+func WithHandler(handler sabu.Handler) InsertOption {
 	if handler == nil {
 		panic("muxie/WithHandler: empty handler")
 	}
@@ -186,7 +185,7 @@ func WithHandler(handler sabuhp.Handler) InsertOption {
 }
 
 // WithTransportResponse sets the node's `Handler` field (useful for HTTP).
-func WithTransportResponse(handler sabuhp.Handler) InsertOption {
+func WithTransportResponse(handler sabu.Handler) InsertOption {
 	if handler == nil {
 		panic("muxie/WithTransportResponse: empty handler")
 	}
@@ -257,7 +256,7 @@ func resolveStaticPart(key string) string {
 	return key[:i]
 }
 
-func (t *Trie) insert(key, tag string, optionalData interface{}, handler sabuhp.Handler) *Node {
+func (t *Trie) insert(key, tag string, optionalData interface{}, handler sabu.Handler) *Node {
 	input := slowPathSplit(key)
 
 	n := t.root

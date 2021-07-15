@@ -2,6 +2,7 @@ package hsocks
 
 import (
 	"context"
+	"github.com/ewe-studios/sabuhp/sabu"
 	"net"
 	"net/http"
 	"strings"
@@ -16,23 +17,21 @@ import (
 	"github.com/influx6/npkg/nxid"
 
 	"github.com/influx6/npkg/nerror"
-
-	"github.com/ewe-studios/sabuhp"
 )
 
 const (
 	ClientIdentificationHeader = "X-SSE-Client-Id"
 )
 
-var _ sabuhp.Handler = (*HttpServlet)(nil)
+var _ sabu.Handler = (*HttpServlet)(nil)
 
 func ManagedHttpServlet(
 	ctx context.Context,
-	logger sabuhp.Logger,
-	decoder sabuhp.HttpDecoder,
-	encoder sabuhp.HttpEncoder,
-	optionalHeaders sabuhp.HeaderModifications,
-	bus sabuhp.MessageBus,
+	logger sabu.Logger,
+	decoder sabu.HttpDecoder,
+	encoder sabu.HttpEncoder,
+	optionalHeaders sabu.HeaderModifications,
+	bus sabu.MessageBus,
 ) *HttpServlet {
 	return &HttpServlet{
 		bus:       bus,
@@ -41,25 +40,25 @@ func ManagedHttpServlet(
 		encoder:   encoder,
 		decoder:   decoder,
 		headerMod: optionalHeaders,
-		streams:   sabuhp.NewSocketServers(),
+		streams:   sabu.NewSocketServers(),
 	}
 }
 
 type HttpServlet struct {
-	logger    sabuhp.Logger
-	decoder   sabuhp.HttpDecoder
-	encoder   sabuhp.HttpEncoder
-	headerMod sabuhp.HeaderModifications
+	logger    sabu.Logger
+	decoder   sabu.HttpDecoder
+	encoder   sabu.HttpEncoder
+	headerMod sabu.HeaderModifications
 	ctx       context.Context
-	streams   *sabuhp.SocketServers
-	bus       sabuhp.MessageBus
+	streams   *sabu.SocketServers
+	bus       sabu.MessageBus
 }
 
-func (htp *HttpServlet) Bus(bus sabuhp.MessageBus) {
+func (htp *HttpServlet) Bus(bus sabu.MessageBus) {
 	htp.bus = bus
 }
 
-func (htp *HttpServlet) Stream(server sabuhp.SocketService) {
+func (htp *HttpServlet) Stream(server sabu.SocketService) {
 	htp.streams.Stream(server)
 }
 
@@ -82,7 +81,7 @@ func (htp *HttpServlet) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var param = sabuhp.Params{}
+	var param = sabu.Params{}
 	for key := range r.Form {
 		param.Set(key, r.Form.Get(key))
 	}
@@ -90,11 +89,11 @@ func (htp *HttpServlet) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	htp.Handle(w, r, param)
 }
 
-func (htp *HttpServlet) Handle(w http.ResponseWriter, r *http.Request, p sabuhp.Params) {
+func (htp *HttpServlet) Handle(w http.ResponseWriter, r *http.Request, p sabu.Params) {
 	htp.HandleMessage(w, r, p, "", nil)
 }
 
-func (htp *HttpServlet) HandleWithResponder(w http.ResponseWriter, r *http.Request, p sabuhp.Params, handler sabuhp.SocketMessageHandler) {
+func (htp *HttpServlet) HandleWithResponder(w http.ResponseWriter, r *http.Request, p sabu.Params, handler sabu.SocketMessageHandler) {
 	htp.HandleMessage(w, r, p, "", handler)
 }
 
@@ -102,9 +101,9 @@ func (htp *HttpServlet) HandleWithResponder(w http.ResponseWriter, r *http.Reque
 func (htp *HttpServlet) HandleMessage(
 	w http.ResponseWriter,
 	r *http.Request,
-	p sabuhp.Params,
+	p sabu.Params,
 	asEvent string,
-	handler sabuhp.SocketMessageHandler,
+	handler sabu.SocketMessageHandler,
 ) {
 	var clientId = r.Header.Get(ClientIdentificationHeader)
 
@@ -205,23 +204,23 @@ func (htp *HttpServlet) HandleMessage(
 		End()
 }
 
-var _ sabuhp.Socket = (*ServletSocket)(nil)
+var _ sabu.Socket = (*ServletSocket)(nil)
 
 type ServletSocket struct {
 	clientId   string
 	xid        nxid.ID
 	asEvent    string
-	streams    *sabuhp.SocketServers
-	logger     sabuhp.Logger
+	streams    *sabu.SocketServers
+	logger     sabu.Logger
 	req        *http.Request
 	res        http.ResponseWriter
 	ctx        context.Context
-	params     sabuhp.Params
+	params     sabu.Params
 	canceler   context.CancelFunc
-	decoder    sabuhp.HttpDecoder
-	encoder    sabuhp.HttpEncoder
-	headers    sabuhp.HeaderModifications
-	handler    sabuhp.SocketMessageHandler
+	decoder    sabu.HttpDecoder
+	encoder    sabu.HttpEncoder
+	headers    sabu.HeaderModifications
+	handler    sabu.SocketMessageHandler
 	remoteAddr net.Addr
 	localAddr  net.Addr
 	sent       int64
@@ -232,16 +231,16 @@ type ServletSocket struct {
 func NewServletSocket(
 	ctx context.Context,
 	clientId string,
-	streams *sabuhp.SocketServers,
+	streams *sabu.SocketServers,
 	r *http.Request,
 	w http.ResponseWriter,
-	params sabuhp.Params,
-	logger sabuhp.Logger,
-	decoder sabuhp.HttpDecoder,
-	encoder sabuhp.HttpEncoder,
-	headerMod sabuhp.HeaderModifications,
+	params sabu.Params,
+	logger sabu.Logger,
+	decoder sabu.HttpDecoder,
+	encoder sabu.HttpEncoder,
+	headerMod sabu.HeaderModifications,
 	asEvent string,
-	handler sabuhp.SocketMessageHandler,
+	handler sabu.SocketMessageHandler,
 ) *ServletSocket {
 	var newCtx, newCanceler = context.WithCancel(ctx)
 	return &ServletSocket{
@@ -287,8 +286,8 @@ func (se *ServletSocket) ID() nxid.ID {
 	return se.xid
 }
 
-func (se *ServletSocket) Stat() sabuhp.SocketStat {
-	var stat sabuhp.SocketStat
+func (se *ServletSocket) Stat() sabu.SocketStat {
+	var stat sabu.SocketStat
 	stat.Id = se.xid.String()
 	stat.Addr = se.localAddr
 	stat.RemoteAddr = se.remoteAddr
@@ -306,7 +305,7 @@ func (se *ServletSocket) LocalAddr() net.Addr {
 	return se.localAddr
 }
 
-func (se *ServletSocket) Send(msgs ...sabuhp.Message) {
+func (se *ServletSocket) Send(msgs ...sabu.Message) {
 	for _, msg := range msgs {
 		var encodeErr = se.encoder.Encode(se.res, msg)
 		if msg.Future != nil {
@@ -341,11 +340,11 @@ func (se *ServletSocket) flush() error {
 	return nil
 }
 
-func (se *ServletSocket) Conn() sabuhp.Conn {
+func (se *ServletSocket) Conn() sabu.Conn {
 	return se.req
 }
 
-func (se *ServletSocket) Listen(handler sabuhp.SocketMessageHandler) {
+func (se *ServletSocket) Listen(handler sabu.SocketMessageHandler) {
 	se.handler = handler
 }
 
@@ -359,7 +358,7 @@ func (se *ServletSocket) Start() error {
 	var decodedMessage, decodedErr = se.decoder.Decode(se.req, se.params)
 	if decodedErr != nil {
 		var statusCode int
-		if nerror.IsAny(decodedErr, sabuhp.BodyToLargeErr) {
+		if nerror.IsAny(decodedErr, sabu.BodyToLargeErr) {
 			statusCode = http.StatusRequestEntityTooLarge
 		} else {
 			statusCode = http.StatusBadRequest
@@ -391,7 +390,7 @@ func (se *ServletSocket) Start() error {
 
 	// if we have being scoped to specific event name, use that.
 	if se.asEvent != "" {
-		decodedMessage.Topic = sabuhp.T(se.asEvent)
+		decodedMessage.Topic = sabu.T(se.asEvent)
 	}
 
 	// overridingHandler overrides sending message to the manager
@@ -403,7 +402,7 @@ func (se *ServletSocket) Start() error {
 			String("error", nerror.WrapOnly(handleErr).Error()).
 			End()
 
-		if mh, ok := handleErr.(sabuhp.MessageErr); ok {
+		if mh, ok := handleErr.(sabu.MessageErr); ok {
 			se.res.WriteHeader(mh.StatusCode())
 		}
 
