@@ -173,15 +173,27 @@ func (rcv *FlatMessage) MetadataLength() int {
 	return 0
 }
 
-func (rcv *FlatMessage) Form() []byte {
+func (rcv *FlatMessage) Params(obj *KV, j int) bool {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(28))
 	if o != 0 {
-		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+		x := rcv._tab.Vector(o)
+		x += flatbuffers.UOffsetT(j) * 4
+		x = rcv._tab.Indirect(x)
+		obj.Init(rcv._tab.Bytes, x)
+		return true
 	}
-	return nil
+	return false
 }
 
-func (rcv *FlatMessage) Query() []byte {
+func (rcv *FlatMessage) ParamsLength() int {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(28))
+	if o != 0 {
+		return rcv._tab.VectorLen(o)
+	}
+	return 0
+}
+
+func (rcv *FlatMessage) Form() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(30))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -189,8 +201,16 @@ func (rcv *FlatMessage) Query() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) Within() float32 {
+func (rcv *FlatMessage) Query() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(32))
+	if o != 0 {
+		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+	}
+	return nil
+}
+
+func (rcv *FlatMessage) Within() float32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(34))
 	if o != 0 {
 		return rcv._tab.GetFloat32(o + rcv._tab.Pos)
 	}
@@ -198,18 +218,10 @@ func (rcv *FlatMessage) Within() float32 {
 }
 
 func (rcv *FlatMessage) MutateWithin(n float32) bool {
-	return rcv._tab.MutateFloat32Slot(32, n)
+	return rcv._tab.MutateFloat32Slot(34, n)
 }
 
 func (rcv *FlatMessage) Id() []byte {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(34))
-	if o != 0 {
-		return rcv._tab.ByteVector(o + rcv._tab.Pos)
-	}
-	return nil
-}
-
-func (rcv *FlatMessage) EndPartId() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(36))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -217,7 +229,7 @@ func (rcv *FlatMessage) EndPartId() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) PartId() []byte {
+func (rcv *FlatMessage) EndPartId() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(38))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -225,7 +237,7 @@ func (rcv *FlatMessage) PartId() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) SubscribeGroup() []byte {
+func (rcv *FlatMessage) PartId() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(40))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -233,7 +245,7 @@ func (rcv *FlatMessage) SubscribeGroup() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) SubscribeTo() []byte {
+func (rcv *FlatMessage) SubscribeGroup() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(42))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -241,7 +253,7 @@ func (rcv *FlatMessage) SubscribeTo() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) Topic() []byte {
+func (rcv *FlatMessage) SubscribeTo() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(44))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -249,7 +261,7 @@ func (rcv *FlatMessage) Topic() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) ReplyGroup() []byte {
+func (rcv *FlatMessage) Topic() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(46))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -257,7 +269,7 @@ func (rcv *FlatMessage) ReplyGroup() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) FromAddr() []byte {
+func (rcv *FlatMessage) ReplyGroup() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(48))
 	if o != 0 {
 		return rcv._tab.ByteVector(o + rcv._tab.Pos)
@@ -265,8 +277,16 @@ func (rcv *FlatMessage) FromAddr() []byte {
 	return nil
 }
 
-func (rcv *FlatMessage) Bytes(j int) int8 {
+func (rcv *FlatMessage) FromAddr() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(50))
+	if o != 0 {
+		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+	}
+	return nil
+}
+
+func (rcv *FlatMessage) Bytes(j int) int8 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(52))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.GetInt8(a + flatbuffers.UOffsetT(j*1))
@@ -275,7 +295,7 @@ func (rcv *FlatMessage) Bytes(j int) int8 {
 }
 
 func (rcv *FlatMessage) BytesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(50))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(52))
 	if o != 0 {
 		return rcv._tab.VectorLen(o)
 	}
@@ -283,7 +303,7 @@ func (rcv *FlatMessage) BytesLength() int {
 }
 
 func (rcv *FlatMessage) MutateBytes(j int, n int8) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(50))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(52))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.MutateInt8(a+flatbuffers.UOffsetT(j*1), n)
@@ -292,7 +312,7 @@ func (rcv *FlatMessage) MutateBytes(j int, n int8) bool {
 }
 
 func FlatMessageStart(builder *flatbuffers.Builder) {
-	builder.StartObject(24)
+	builder.StartObject(25)
 }
 func FlatMessageAddPath(builder *flatbuffers.Builder, path flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(path), 0)
@@ -339,41 +359,47 @@ func FlatMessageAddMetadata(builder *flatbuffers.Builder, metadata flatbuffers.U
 func FlatMessageStartMetadataVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(4, numElems, 4)
 }
+func FlatMessageAddParams(builder *flatbuffers.Builder, params flatbuffers.UOffsetT) {
+	builder.PrependUOffsetTSlot(12, flatbuffers.UOffsetT(params), 0)
+}
+func FlatMessageStartParamsVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
+	return builder.StartVector(4, numElems, 4)
+}
 func FlatMessageAddForm(builder *flatbuffers.Builder, form flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(12, flatbuffers.UOffsetT(form), 0)
+	builder.PrependUOffsetTSlot(13, flatbuffers.UOffsetT(form), 0)
 }
 func FlatMessageAddQuery(builder *flatbuffers.Builder, query flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(13, flatbuffers.UOffsetT(query), 0)
+	builder.PrependUOffsetTSlot(14, flatbuffers.UOffsetT(query), 0)
 }
 func FlatMessageAddWithin(builder *flatbuffers.Builder, within float32) {
-	builder.PrependFloat32Slot(14, within, 0.0)
+	builder.PrependFloat32Slot(15, within, 0.0)
 }
 func FlatMessageAddId(builder *flatbuffers.Builder, id flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(15, flatbuffers.UOffsetT(id), 0)
+	builder.PrependUOffsetTSlot(16, flatbuffers.UOffsetT(id), 0)
 }
 func FlatMessageAddEndPartId(builder *flatbuffers.Builder, endPartId flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(16, flatbuffers.UOffsetT(endPartId), 0)
+	builder.PrependUOffsetTSlot(17, flatbuffers.UOffsetT(endPartId), 0)
 }
 func FlatMessageAddPartId(builder *flatbuffers.Builder, partId flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(17, flatbuffers.UOffsetT(partId), 0)
+	builder.PrependUOffsetTSlot(18, flatbuffers.UOffsetT(partId), 0)
 }
 func FlatMessageAddSubscribeGroup(builder *flatbuffers.Builder, subscribeGroup flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(18, flatbuffers.UOffsetT(subscribeGroup), 0)
+	builder.PrependUOffsetTSlot(19, flatbuffers.UOffsetT(subscribeGroup), 0)
 }
 func FlatMessageAddSubscribeTo(builder *flatbuffers.Builder, subscribeTo flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(19, flatbuffers.UOffsetT(subscribeTo), 0)
+	builder.PrependUOffsetTSlot(20, flatbuffers.UOffsetT(subscribeTo), 0)
 }
 func FlatMessageAddTopic(builder *flatbuffers.Builder, topic flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(20, flatbuffers.UOffsetT(topic), 0)
+	builder.PrependUOffsetTSlot(21, flatbuffers.UOffsetT(topic), 0)
 }
 func FlatMessageAddReplyGroup(builder *flatbuffers.Builder, replyGroup flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(21, flatbuffers.UOffsetT(replyGroup), 0)
+	builder.PrependUOffsetTSlot(22, flatbuffers.UOffsetT(replyGroup), 0)
 }
 func FlatMessageAddFromAddr(builder *flatbuffers.Builder, fromAddr flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(22, flatbuffers.UOffsetT(fromAddr), 0)
+	builder.PrependUOffsetTSlot(23, flatbuffers.UOffsetT(fromAddr), 0)
 }
 func FlatMessageAddBytes(builder *flatbuffers.Builder, bytes flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(23, flatbuffers.UOffsetT(bytes), 0)
+	builder.PrependUOffsetTSlot(24, flatbuffers.UOffsetT(bytes), 0)
 }
 func FlatMessageStartBytesVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(1, numElems, 1)

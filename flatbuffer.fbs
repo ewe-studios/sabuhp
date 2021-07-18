@@ -18,6 +18,7 @@ table FlatMessage {
   headers:[KV];
   cookies:[KV];
   metadata:[KV];
+  params:[KV];
   form:string;
   query:string;
   within:float;

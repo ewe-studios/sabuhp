@@ -99,23 +99,6 @@ type Message struct {
 	// notify attached future on result.
 	Future *nthen.Future
 
-	// Path of the request producing this if from http.
-	Path string
-
-	// IP of the request producing this if from http.
-	IP string
-
-	// LocalIP of the request producing this if from http.
-	LocalIP string
-
-	// ExpectReply indicates if the receiver of said message should
-	// handle this as a SendReply operation.
-	ExpectReply bool
-
-	// Optional reply error send to indicate message is an error reply
-	// and the error that occurred.
-	ReplyErr error
-
 	// SuggestedStatusCode is an optional field settable by the
 	// creator to suggest possible status code of a message.
 	SuggestedStatusCode int
@@ -131,6 +114,64 @@ type Message struct {
 
 	// FileName is optional attached file name which represents this data.
 	FileName string
+
+	// Path of the request producing this if from http.
+	Path string
+
+	// IP of the request producing this if from http.
+	IP string
+
+	// LocalIP of the request producing this if from http.
+	LocalIP string
+
+	// ExpectReply indicates if the receiver of said message should
+	// handle this as a SendReply operation.
+	ExpectReply bool
+
+	// ReplyGroup is the when provided the suggested topic to reply to by receiving party.
+	ReplyGroup string
+
+	// FromAddr is the logical address of the sender of message.
+	FromAddr string
+
+	// Bytes is the payload for giving message.
+	Bytes []byte
+
+	// SubscribeGroup for subscribe/unsubscribe message types which
+	// allow to indicate which group a topic should fall into.
+	SubscribeGroup string
+
+	// SubscribeTo for subscribe/unsubscribe message types which
+	// allow to indicate which topic should a subscribe or unsubscribe
+	// be applied to.
+	SubscribeTo string
+
+	// Id is the unique id attached to giving message
+	// for tracking it's delivery and trace its different touch
+	// points where it was handled.
+	Id nxid.ID
+
+	// EndPartId is the unique id attached to giving messages which
+	// indicate the expected end id which when seen as the Id
+	// should consider a part stream as completed.
+	//
+	// This will be created from the start and then tagged to the final
+	// message as both the EndPartId and PartId fields, which will identify
+	// that a series of broken messages have been completed.
+	EndPartId nxid.ID
+
+	// PartId is the unique id attached to giving messages when
+	// they are a shared part of a larger messages. There are cases
+	// when a message may become sent as broken parts for recollection
+	// at the other end.
+	PartId nxid.ID
+
+	// Topic for giving message (serving as to address).
+	Topic Topic
+
+	// Optional reply error send to indicate message is an error reply
+	// and the error that occurred.
+	ReplyErr error
 
 	// Headers are related facts attached to a message.
 	Headers Header
@@ -156,47 +197,6 @@ type Message struct {
 	// willing to wait for message delivery. Usually this should end
 	// with error resolution of attached future if present.
 	Within time.Duration
-
-	// Id is the unique id attached to giving message
-	// for tracking it's delivery and trace its different touch
-	// points where it was handled.
-	Id nxid.ID
-
-	// EndPartId is the unique id attached to giving messages which
-	// indicate the expected end id which when seen as the Id
-	// should consider a part stream as completed.
-	//
-	// This will be created from the start and then tagged to the final
-	// message as both the EndPartId and PartId fields, which will identify
-	// that a series of broken messages have been completed.
-	EndPartId nxid.ID
-
-	// PartId is the unique id attached to giving messages when
-	// they are a shared part of a larger messages. There are cases
-	// when a message may become sent as broken parts for recollection
-	// at the other end.
-	PartId nxid.ID
-
-	// SubscribeGroup for subscribe/unsubscribe message types which
-	// allow to indicate which group a topic should fall into.
-	SubscribeGroup string
-
-	// SubscribeTo for subscribe/unsubscribe message types which
-	// allow to indicate which topic should a subscribe or unsubscribe
-	// be applied to.
-	SubscribeTo string
-
-	// Topic for giving message (serving as to address).
-	Topic Topic
-
-	// ReplyGroup is the when provided the suggested topic to reply to by receiving party.
-	ReplyGroup string
-
-	// FromAddr is the logical address of the sender of message.
-	FromAddr string
-
-	// Bytes is the payload for giving message.
-	Bytes []byte
 
 	// Metadata are related facts attached to a message.
 	Metadata Params
