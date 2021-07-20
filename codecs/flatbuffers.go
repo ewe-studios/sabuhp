@@ -13,17 +13,6 @@ import (
 
 var _ sabu.Codec = (*FlatBufferCodec)(nil)
 
-type MessageToBuilder interface {
-	Convert(in sabu.Message) (*flatbuffers.Builder, error)
-}
-
-type MessageToBuilderImpl struct {
-	Size int
-}
-
-func (m MessageToBuilderImpl) Convert(in sabu.Message) (*flatbuffers.Builder, error) {
-}
-
 func copyBytes(fb func(int) int8, lt int) []byte {
 	var m = make([]byte, lt)
 	for i := 0; i < lt; i++ {
