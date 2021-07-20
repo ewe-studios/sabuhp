@@ -1,6 +1,7 @@
 package sabu
 
 import (
+	"github.com/influx6/npkg/nerror"
 	"log"
 	"net"
 	"strconv"
@@ -273,7 +274,39 @@ func ReadCookies(h Header, filter string) []Cookie {
 	return cookies
 }
 
-// validCookieDomain reports whether v is a valid cookie domain-value.
+// ParseCookieString parses a cookie's value from the produced string
+// received.
+func ParseCookieString(cookieText string) (Cookie, error) {
+	cookieText = strings.TrimSpace(cookieText)
+
+	var part string
+	for len(cookieText) > 0 { // continue since we have rest
+		if splitIndex := strings.Index(cookieText, ";"); splitIndex > 0 {
+			part, cookieText = cookieText[:splitIndex], cookieText[splitIndex+1:]
+		} else {
+			part, cookieText = cookieText, ""
+		}
+		part = strings.TrimSpace(part)
+		if len(part) == 0 {
+			return Cookie{}, nerror.New("cookie has no value portion")
+		}
+		name, val := part, ""
+		if j := strings.Index(part, "="); j >= 0 {
+			name, val = name[:j], name[j+1:]
+		}
+		if !isCookieNameValid(name) {
+			return Cookie{}, nerror.New("failed to parse cookie name, invalid name possibly")
+		}
+		val, ok := parseCookieValue(val, true)
+		if !ok {
+			return Cookie{}, nerror.New("failed to parse value")
+		}
+		return Cookie{Name: name, Value: val}, nil
+	}
+	return Cookie{}, nerror.New("failed to parse cookie")
+}
+
+	// validCookieDomain reports whether v is a valid cookie domain-value.
 func validCookieDomain(v string) bool {
 	if isCookieDomainName(v) {
 		return true

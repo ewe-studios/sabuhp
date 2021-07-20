@@ -7,6 +7,7 @@ import (
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/nxid"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -21,16 +22,7 @@ type MessageToBuilderImpl struct {
 }
 
 func (m MessageToBuilderImpl) Convert(in sabu.Message) (*flatbuffers.Builder, error) {
-	var builder = flatbuffers.NewBuilder(m.Size)
-
-	return builder, nil
 }
-
-type FlatBufferToMessage interface {
-	Convert(b []byte) (sabu.Message, error)
-}
-
-type FlatBufferToMessageImpl struct{}
 
 func copyBytes(fb func(int) int8, lt int) []byte {
 	var m = make([]byte, lt)
@@ -40,7 +32,88 @@ func copyBytes(fb func(int) int8, lt int) []byte {
 	return m
 }
 
-func (f FlatBufferToMessageImpl) Convert(b []byte) (sabu.Message, error) {
+type FlatBufferCodec struct {
+	BuilderBuffer int
+}
+
+func (j FlatBufferCodec) Encode(in sabu.Message) ([]byte, error) {
+	in.Parts = nil
+
+	var builder = flatbuffers.NewBuilder(j.BuilderBuffer)
+
+	sabu.FlatMessageStart(builder)
+	sabu.FlatMessageAddSuggestedStatusCode(builder, int16(in.SuggestedStatusCode))
+	sabu.FlatMessageAddPath(builder, builder.CreateString(in.Path))
+	sabu.FlatMessageAddBytes(builder, builder.CreateByteVector(in.Bytes))
+	sabu.FlatMessageAddContentType(builder, builder.CreateString(in.ContentType))
+	sabu.FlatMessageAddFileName(builder, builder.CreateString(in.FileName))
+	sabu.FlatMessageAddFormName(builder, builder.CreateString(in.FormName))
+
+	sabu.FlatMessageStartCookiesVector(builder, len(in.Cookies))
+	for _, cookie := range in.Cookies {
+		sabu.KVStart(builder)
+		sabu.KVAddName(builder, builder.CreateString(cookie.Name))
+		sabu.KVAddValue(builder, builder.CreateString(cookie.Value))
+		sabu.FlatMessageAddCookies(builder, sabu.KVEnd(builder))
+	}
+
+	sabu.FlatMessageAddEndPartId(builder, builder.CreateString(in.Id.String()))
+	if in.ExpectReply {
+		sabu.FlatMessageAddExpectedReply(builder, 1)
+	} else {
+		sabu.FlatMessageAddExpectedReply(builder, 0)
+	}
+
+	sabu.FlatMessageAddFromAddr(builder, builder.CreateString(in.FromAddr))
+	sabu.FlatMessageAddId(builder,  builder.CreateString(in.Id.String()))
+	sabu.FlatMessageAddIp(builder,  builder.CreateString(in.IP))
+	sabu.FlatMessageAddLocalIp(builder,  builder.CreateString(in.LocalIP))
+	sabu.FlatMessageAddPartId(builder,  builder.CreateString(in.PartId.String()))
+	sabu.FlatMessageAddEndPartId(builder,  builder.CreateString(in.EndPartId.String()))
+	sabu.FlatMessageAddTopic(builder,  builder.CreateString(in.Topic.String()))
+	sabu.FlatMessageAddSubscribeTo(builder, builder.CreateString(in.SubscribeTo))
+	sabu.FlatMessageAddSubscribeGroup(builder, builder.CreateString(in.SubscribeGroup))
+
+	if in.ReplyErr != nil {
+		sabu.FlatMessageAddReplyErr(builder, builder.CreateString(in.ReplyErr.Error()))
+	}
+
+
+	sabu.FlatMessageStartMetadataVector(builder, len(in.Cookies))
+	for headerName, headerValue := range in.Headers {
+		sabu.KVStart(builder)
+		sabu.KVAddName(builder, builder.CreateString(headerName))
+		sabu.KVAddValue(builder, builder.CreateString(strings.Join(headerValue, ";")))
+		sabu.FlatMessageAddMetadata(builder, sabu.KVEnd(builder))
+	}
+
+	sabu.FlatMessageStartHeadersVector(builder, len(in.Cookies))
+	for headerName, headerValue := range in.Metadata {
+		sabu.KVStart(builder)
+		sabu.KVAddName(builder, builder.CreateString(headerName))
+		sabu.KVAddValue(builder, builder.CreateString(headerValue))
+		sabu.FlatMessageAddHeaders(builder, sabu.KVEnd(builder))
+	}
+
+
+	sabu.FlatMessageStartParamsVector(builder, len(in.Cookies))
+	for headerName, headerValue := range in.Params {
+		sabu.KVStart(builder)
+		sabu.KVAddName(builder, builder.CreateString(headerName))
+		sabu.KVAddValue(builder, builder.CreateString(headerValue))
+		sabu.FlatMessageAddParams(builder, sabu.KVEnd(builder))
+	}
+
+	sabu.FlatMessageAddForm(builder, builder.CreateString(in.Form.Encode()))
+	sabu.FlatMessageAddQuery(builder, builder.CreateString(in.Query.Encode()))
+	sabu.FlatMessageAddWithin(builder, float32(in.Within / time.Millisecond))
+	sabu.FlatMessageAddReplyGroup(builder, builder.CreateString(in.ReplyGroup))
+	sabu.FlatMessageEnd(builder)
+
+	return builder.FinishedBytes(), nil
+}
+
+func (j FlatBufferCodec) Decode(b []byte) (sabu.Message, error) {
 	var flm sabu.FlatMessage
 	flm.Init(b, flatbuffers.GetUOffsetT(b))
 
@@ -101,6 +174,7 @@ func (f FlatBufferToMessageImpl) Convert(b []byte) (sabu.Message, error) {
 	for i := 0; i < flm.CookiesLength(); i++ {
 		var headerPart = new(sabu.KV)
 		flm.Cookies(headerPart, i)
+
 		m.Cookies = append(m.Cookies, sabu.Cookie{
 			Name: string(headerPart.Name()),
 			Value: string(headerPart.Value()),
@@ -137,28 +211,6 @@ func (f FlatBufferToMessageImpl) Convert(b []byte) (sabu.Message, error) {
 		m.Headers.Set(string(headerPart.Name()), string(headerPart.Value()))
 	}
 
+	m.Future = nil
 	return m, nil
-}
-
-type FlatBufferCodec struct {
-	MessageConverter    MessageToBuilder
-	FlatBufferConverter FlatBufferToMessage
-}
-
-func (j *FlatBufferCodec) Encode(message sabu.Message) ([]byte, error) {
-	message.Parts = nil
-	var flatBuilder, err = j.MessageConverter.Convert(message)
-	if err != nil {
-		return nil, nerror.WrapOnly(err)
-	}
-	return flatBuilder.FinishedBytes(), nil
-}
-
-func (j *FlatBufferCodec) Decode(b []byte) (sabu.Message, error) {
-	var message, err = j.FlatBufferConverter.Convert(b)
-	if err != nil {
-		return message, nerror.WrapOnly(err)
-	}
-	message.Future = nil
-	return message, nil
 }
